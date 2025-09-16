@@ -113,14 +113,23 @@ async def main():
                         continue
 
                     sent_count = 0
+                    existed_count = 0
+                    total_candidates = len(notes) if notes else 0
                     for note_info in notes:
                         if sent_count >= per_account_limit:
                             break
                         try:
                             # 增量检查：判断笔记是否已存在
                             note_id_key = 'note_id' if t_type == 'xhs_user_notes' else 'article_id'
-                            if await feishu_for_task.check_note_exists(note_info.get(note_id_key) or note_info.get('note_id')):
+                            note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
+                            print(f"[去重检查] sink={sink_key} id={note_id_val} -> 查询飞书是否已存在...")
+                            exists = await feishu_for_task.check_note_exists(note_id_val)
+                            if exists:
+                                print(f"[已存在] 跳过 id={note_id_val}")
+                                existed_count += 1
                                 continue
+                            else:
+                                print(f"[需要抓详情] id={note_id_val}")
 
                             # 爬取笔记详情
                             if t_type == 'xhs_user_notes':
@@ -151,6 +160,7 @@ async def main():
                             print(f"处理笔记 {note_info.get('note_id')} 时发生严重错误: {e}")
 
                     print(f"--- 用户 {user_url} 处理完毕，本次已发送 {sent_count}/{per_account_limit} 条 ---")
+                    print(f"=== 小结: 候选 {total_candidates} 条 | 已存在 {existed_count} 条 | 新写入 {sent_count} 条 ===")
                     summary_counts[user_url] = sent_count
 
         finally:

@@ -29,7 +29,6 @@ FEISHU_BASE_TABLE_ID = os.environ.get("FEISHU_BASE_TABLE_ID", "tbloiTbxqmYBdGiz"
 XHS_TARGET_URLS = [
     "https://www.xiaohongshu.com/user/profile/67bd26f8000000000d00a18c",
     "https://www.xiaohongshu.com/user/profile/5c2ef7bf000000000700e62b",
-    "https://www.xiaohongshu.com/user/profile/5c2ef7bf000000000700e62b",
     "https://www.xiaohongshu.com/user/profile/5e5cc694000000000100bfc4",
     "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
 ]

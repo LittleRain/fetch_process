@@ -181,35 +181,65 @@ class XhsScraper:
                 print(f"保存首页调试信息失败: {e}")
         # 严格按页面“从上到下（再从左到右）”顺序选取前 max_count 条
         scraped_notes = []
+        handles = []
         try:
             handles = await notes_locator.element_handles()
-            positioned = []
-            for idx, h in enumerate(handles):
-                # 取位置信息
-                try:
-                    pos = await h.evaluate("el => { const r = el.getBoundingClientRect(); return {t: r.top, l: r.left}; }")
-                    top = float(pos.get('t', 1e9)) if pos else 1e9
-                    left = float(pos.get('l', 1e9)) if pos else 1e9
-                except Exception:
-                    top, left = 1e9, 1e9
-                # 取 href
-                note_url = await h.get_attribute('href')
-                if not note_url:
-                    try:
-                        note_url = await h.evaluate("el => el.closest('a') && el.closest('a').getAttribute('href')")
-                    except Exception:
-                        note_url = None
-                if not note_url:
-                    continue
-                note_id = _parse_note_id(note_url)
-                if not note_id:
-                    continue
-                full_url = note_url if not note_url.startswith('/') else f"https://www.xiaohongshu.com{note_url}"
-                positioned.append((top, left, idx, note_id, full_url, note_url))
+        except Exception as e:
+            print(f"获取卡片元素句柄时异常: {e}")
 
-            # 去重并排序（top, left 升序）
+        positioned = []
+        skipped_handles = 0
+        for idx, h in enumerate(handles):
+            top, left = 1e9, 1e9
+            try:
+                pos = await h.evaluate(
+                    "el => {\n"
+                    "  const card = el.closest('section.note-item, li.note-item, .note-item, .note-card') || el;\n"
+                    "  const r = card.getBoundingClientRect();\n"
+                    "  return { t: (r.top || 0) + window.scrollY, l: (r.left || 0) + window.scrollX };\n"
+                    "}"
+                )
+                if pos:
+                    top = float(pos.get('t', 1e9))
+                    left = float(pos.get('l', 1e9))
+            except Exception:
+                pass
+
+            note_url = None
+            try:
+                note_url = await h.get_attribute('href')
+            except Exception:
+                note_url = None
+            if not note_url:
+                try:
+                    note_url = await h.evaluate("el => el.closest('a') && el.closest('a').getAttribute('href')")
+                except Exception:
+                    note_url = None
+            if not note_url:
+                skipped_handles += 1
+                continue
+
+            note_id = _parse_note_id(note_url)
+            if not note_id:
+                continue
+
+            full_url = note_url if not note_url.startswith('/') else f"https://www.xiaohongshu.com{note_url}"
+            positioned.append((top, left, idx, note_id, full_url, note_url))
+
+        if skipped_handles:
+            print(f"有 {skipped_handles} 个卡片未能提取有效链接，已跳过。")
+
+        if positioned:
             positioned.sort(key=lambda x: (x[0], x[1]))
             seen_ids = set()
+            # DEBUG: 打印排序后的前若干条用于定位顺序问题
+            try:
+                preview = positioned[:max_count]
+                print("已按页面位置排序（前序预览）：")
+                for i, (t, l, oidx, nid, full_url, raw_href) in enumerate(preview, start=1):
+                    print(f"  #{i} y={int(t)} x={int(l)} id={nid} href={raw_href}")
+            except Exception:
+                pass
             for _, __, orig_idx, note_id, full_url, raw_href in positioned:
                 if note_id in seen_ids:
                     continue
@@ -222,21 +252,28 @@ class XhsScraper:
                 })
                 if len(scraped_notes) >= max_count:
                     break
-        except Exception:
-            # 回退到 DOM 顺序
+
+        if not scraped_notes and max_count > 0:
+            print("未能按位置排序卡片，回退到 DOM 顺序。")
+            seen_ids = set()
             for idx in range(max_count):
                 note_handle = notes_locator.nth(idx)
-                note_url = await note_handle.get_attribute('href')
+                note_url = None
+                try:
+                    note_url = await note_handle.get_attribute('href')
+                except Exception:
+                    note_url = None
                 if not note_url:
                     try:
                         note_url = await note_handle.evaluate("el => el.closest('a') && el.closest('a').getAttribute('href')")
                     except Exception:
                         note_url = None
-                    if not note_url:
-                        continue
-                note_id = _parse_note_id(note_url)
-                if not note_id:
+                if not note_url:
                     continue
+                note_id = _parse_note_id(note_url)
+                if not note_id or note_id in seen_ids:
+                    continue
+                seen_ids.add(note_id)
                 full_url = note_url if not note_url.startswith('/') else f"https://www.xiaohongshu.com{note_url}"
                 scraped_notes.append({
                     "note_id": note_id,
@@ -244,6 +281,8 @@ class XhsScraper:
                     "index": idx,
                     "raw_href": note_url,
                 })
+                if len(scraped_notes) >= max_count:
+                    break
 
         print(f"最终收集到 {len(scraped_notes)} 条笔记。")
         return scraped_notes
@@ -265,6 +304,7 @@ class XhsScraper:
         clicked_navigation = False
         popup_page: Optional[Page] = None
         extra_note_page: Optional[Page] = None
+        restore_url: Optional[str] = None
 
         def _build_direct_note_url() -> Optional[str]:
             """
@@ -1130,6 +1170,53 @@ class XhsScraper:
             # --- 打印图片结构供确认，并抓取图片URL（过滤头像/图标） ---
             
             unique_image_urls = await extract_image_urls(pg)
+
+            # 若首次解析获取不到正文或图片，启用“直开详情页”兜底。
+            # 直接以 raw_href 或 explore/<id>?query 生成绝对 URL，在新标签页中打开并重新解析。
+            need_fallback = (not content or not content.strip() or not unique_image_urls)
+            if need_fallback:
+                try:
+                    fb_url = _build_direct_note_url() or _build_explore_url_with_query() or note_info.get('url')
+                    if fb_url and fb_url.startswith('/'):
+                        fb_url = f"https://www.xiaohongshu.com{fb_url}"
+                except Exception:
+                    fb_url = note_info.get('url')
+                    if fb_url and fb_url.startswith('/'):
+                        fb_url = f"https://www.xiaohongshu.com{fb_url}"
+
+                if fb_url:
+                    try:
+                        extra_note_page = await self.context.new_page()
+                        await extra_note_page.goto(fb_url, wait_until="domcontentloaded")
+                        try:
+                            await extra_note_page.wait_for_load_state("networkidle")
+                        except Exception:
+                            pass
+                        try:
+                            for _ in range(4):
+                                await extra_note_page.evaluate("window.scrollBy(0, Math.max(300, window.innerHeight))")
+                                await extra_note_page.wait_for_timeout(700)
+                        except Exception:
+                            pass
+
+                        # 切换解析上下文为新开的详情页
+                        pg = extra_note_page
+                        clicked_navigation = True
+
+                        # 重新解析
+                        content2 = await first_text(content_candidates, pg)
+                        imgs2 = await extract_image_urls(pg)
+                        # 时间也可能在直开页更完整
+                        post_time2 = await extract_post_date(pg)
+                        if content2 and content2.strip():
+                            content = content2
+                        if imgs2:
+                            unique_image_urls = imgs2
+                        if post_time2:
+                            post_time = post_time2
+                    except Exception:
+                        # 兜底失败则继续使用原解析结果
+                        pass
 
             # --- 其他字段 ---
             note_details = {}

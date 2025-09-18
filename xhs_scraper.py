@@ -3,7 +3,7 @@ import asyncio
 import random
 import re
 from playwright.async_api import Page, BrowserContext, Frame
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, urljoin
 from typing import List, Dict, Optional, Union
 
 class XhsScraper:
@@ -998,99 +998,156 @@ class XhsScraper:
 
 
         async def extract_image_urls(page: Union[Page, Frame]) -> List[str]:
-            """提取“笔记内容区域”的图片 URL，优先抓取笔记轮播图(note-slider-img)。"""
-            # 0) 明确优先抓取 slider 中的图片（根据你的调试信息：img.note-slider-img 位于 .slider-container/.img-container 下）
+            """提取笔记详情页的大图 URL，优先解析 `.swiper-wrapper img` 节点。"""
+
+            def _normalize_url(raw: str, base_url: str) -> str:
+                if not raw:
+                    return ""
+                candidate = raw.strip()
+                if not candidate or candidate.startswith("data:"):
+                    return ""
+                if candidate.startswith("//"):
+                    scheme = "https:" if base_url.startswith("https") else "http:"
+                    return scheme + candidate
+                if candidate.startswith("http://") or candidate.startswith("https://"):
+                    return candidate
+                if base_url:
+                    return urljoin(base_url, candidate)
+                return candidate
+
+            base_url = ""
+            try:
+                base_url = page.url
+            except Exception:
+                base_url = ""
+            if not base_url:
+                fallback_base = note_info.get("raw_href") or note_info.get("url") or ""
+                if fallback_base.startswith("//"):
+                    base_url = "https:" + fallback_base
+                elif fallback_base.startswith("/"):
+                    base_url = f"https://www.xiaohongshu.com{fallback_base}"
+                else:
+                    base_url = fallback_base
+
             urls: List[str] = []
             try:
-                slider_imgs = await page.evaluate(
+                swiper_items = await page.evaluate(
                     "() => {\n"
-                    "  const sels = [\n"
-                    "    '.slider-container img.note-slider-img',\n"
-                    "    '.img-container img.note-slider-img',\n"
-                    "    'img.note-slider-img'\n"
-                    "  ];\n"
-                    "  const seen = new Set();\n"
-                    "  const res = [];\n"
                     "  const pickFromSrcset = (s) => {\n"
-                    "    if(!s) return ''; const parts = s.split(',').map(p=>p.trim()).filter(Boolean);\n"
-                    "    if(!parts.length) return ''; const last = parts[parts.length-1]; return (last.split(' ')[0]||'').trim();\n"
+                    "    if (!s) return '';\n"
+                    "    const parts = s.split(',').map(p => p.trim()).filter(Boolean);\n"
+                    "    if (!parts.length) return '';\n"
+                    "    const last = parts[parts.length - 1];\n"
+                    "    return (last.split(' ')[0] || '').trim();\n"
                     "  };\n"
-                    "  for(const sel of sels){\n"
-                    "    const nodes = document.querySelectorAll(sel);\n"
-                    "    for(const img of nodes){\n"
-                    "      const src = img.getAttribute('src') || '';\n"
-                    "      const ds = img.getAttribute('data-src') || img.dataset.src || '';\n"
-                    "      const ss = pickFromSrcset(img.getAttribute('srcset')||'');\n"
-                    "      const cands = [src, ds, ss].filter(Boolean);\n"
-                    "      for(const u of cands){\n"
-                    "        if(!seen.has(u) && !u.startsWith('data:')){ seen.add(u); res.push(u); }\n"
-                    "      }\n"
-                    "    }\n"
-                    "    if(res.length>0) break;\n"
+                    "  const slides = Array.from(document.querySelectorAll('.swiper-wrapper .swiper-slide'));\n"
+                    "  const mainSlides = slides.filter(slide => !slide.classList.contains('swiper-slide-duplicate'));\n"
+                    "  const targetSlides = mainSlides.length ? mainSlides : slides;\n"
+                    "  const res = [];\n"
+                    "  const seen = new Set();\n"
+                    "  const pushCandidate = (order, img) => {\n"
+                    "    if (!img) return;\n"
+                    "    const src = img.getAttribute('src') || '';\n"
+                    "    const dataSrc = img.getAttribute('data-src') || img.dataset.src || '';\n"
+                    "    const srcset = pickFromSrcset(img.getAttribute('srcset') || '');\n"
+                    "    const candidates = [src, dataSrc, srcset].filter(Boolean);\n"
+                    "    if (!candidates.length) return;\n"
+                    "    res.push({ order, candidates });\n"
+                    "  };\n"
+                    "  if (targetSlides.length) {\n"
+                    "    targetSlides.forEach((slide, order) => {\n"
+                    "      const idxAttr = slide.getAttribute('data-swiper-slide-index');\n"
+                    "      const hasIdx = idxAttr !== null && idxAttr !== '';\n"
+                    "      const realIndex = hasIdx ? Number(idxAttr) : order;\n"
+                    "      if (Number.isNaN(realIndex)) return;\n"
+                    "      if (hasIdx && seen.has(realIndex)) return;\n"
+                    "      if (hasIdx) seen.add(realIndex);\n"
+                    "      const img = slide.querySelector('img');\n"
+                    "      pushCandidate(realIndex, img);\n"
+                    "    });\n"
+                    "  }\n"
+                    "  if (!res.length) {\n"
+                    "    const imgs = Array.from(document.querySelectorAll('.swiper-wrapper img'));\n"
+                    "    imgs.forEach((img, order) => pushCandidate(order, img));\n"
                     "  }\n"
                     "  return res;\n"
                     "}"
                 )
-                for u in slider_imgs or []:
-                    urls.append(u)
+                if swiper_items:
+                    swiper_items = sorted(swiper_items, key=lambda item: item.get('order', 0))
+                    for item in swiper_items:
+                        for candidate in item.get('candidates') or []:
+                            normalized = _normalize_url(candidate, base_url)
+                            if normalized and normalized not in urls:
+                                urls.append(normalized)
+                                break
             except Exception:
                 urls = []
 
-            # 1) 若 slider 未命中，再回退到 article 内较大图片的通用抓取
             if not urls:
                 try:
-                    imgs_info = await page.evaluate(
-                        "() => Array.from(document.querySelectorAll('img'), img => {\n"
-                        "  const r = img.getBoundingClientRect();\n"
-                        "  const inArticle = !!img.closest('article');\n"
-                        "  return {\n"
-                        "    src: img.getAttribute('src') || '',\n"
-                        "    srcset: img.getAttribute('srcset') || '',\n"
-                        "    dataSrc: img.getAttribute('data-src') || img.dataset.src || '',\n"
-                        "    classes: (img.getAttribute('class') || '').toLowerCase(),\n"
-                        "    alt: (img.getAttribute('alt') || '').toLowerCase(),\n"
-                        "    natW: (img.naturalWidth || 0),\n"
-                        "    natH: (img.naturalHeight || 0),\n"
-                        "    cw: (r ? Math.round(r.width) : 0),\n"
-                        "    ch: (r ? Math.round(r.height) : 0),\n"
-                        "    inArticle,\n"
+                    fallback_items = await page.evaluate(
+                        "() => {\n"
+                        "  const pickFromSrcset = (s) => {\n"
+                        "    if (!s) return '';\n"
+                        "    const parts = s.split(',').map(p => p.trim()).filter(Boolean);\n"
+                        "    if (!parts.length) return '';\n"
+                        "    const last = parts[parts.length - 1];\n"
+                        "    return (last.split(' ')[0] || '').trim();\n"
                         "  };\n"
-                        "})"
+                        "  const parseNumeric = (val) => {\n"
+                        "    if (val === undefined || val === null) return null;\n"
+                        "    const num = Number(val);\n"
+                        "    return Number.isFinite(num) ? num : null;\n"
+                        "  };\n"
+                        "  const res = [];\n"
+                        "  const pushCandidate = (img, domOrder) => {\n"
+                        "    if (!img) return;\n"
+                        "    const dataset = img.dataset || {};\n"
+                        "    const orderSources = [\n"
+                        "      dataset.index, dataset.imageIndex, dataset.idx, dataset.order, dataset.no, dataset.seq,\n"
+                        "      img.getAttribute('data-index'),\n"
+                        "      img.getAttribute('data-image-index'),\n"
+                        "      img.getAttribute('data-idx'),\n"
+                        "      img.getAttribute('data-order'),\n"
+                        "    ];\n"
+                        "    let order = null;\n"
+                        "    for (const src of orderSources) {\n"
+                        "      const num = parseNumeric(src);\n"
+                        "      if (num !== null) { order = num; break; }\n"
+                        "    }\n"
+                        "    const src = img.getAttribute('src') || '';\n"
+                        "    const dataSrc = img.getAttribute('data-src') || dataset.src || '';\n"
+                        "    const srcset = pickFromSrcset(img.getAttribute('srcset') || '');\n"
+                        "    const candidates = [src, dataSrc, srcset].filter(Boolean);\n"
+                        "    if (!candidates.length) return;\n"
+                        "    res.push({ order, domOrder, candidates });\n"
+                        "  };\n"
+                        "  const imgs = Array.from(document.querySelectorAll('article img, .note-content img'));\n"
+                        "  imgs.forEach((img, idx) => pushCandidate(img, idx));\n"
+                        "  return res;\n"
+                        "}"
                     )
-                    def pick_from_srcset(s: str) -> str:
-                        if not s:
-                            return ''
-                        parts = [p.strip() for p in s.split(',') if p.strip()]
-                        last = parts[-1]
-                        return last.split(' ')[0]
+                    if fallback_items:
+                        def _fallback_sort_key(item):
+                            order = item.get('order')
+                            dom_order = item.get('domOrder', 0)
+                            return (order if order is not None else float('inf'), dom_order)
 
-                    def good_src(s: str) -> bool:
-                        if not s or s.startswith('data:'):
-                            return False
-                        s2 = s.lower()
-                        return ('xhsimg' in s2) or ('xiaohongshu.com' in s2) or ('sns-img' in s2)
-
-                    def is_noise(cls: str, alt: str) -> bool:
-                        flags = ['avatar', 'icon', 'logo', 'badge', 'header', 'footer', 'nav', 'sprite']
-                        return any(f in cls or f in alt for f in flags)
-
-                    seen = set(urls)
-                    for it in imgs_info or []:
-                        if not it.get('inArticle'):
-                            continue
-                        if is_noise(it.get('classes',''), it.get('alt','')):
-                            continue
-                        if max(it.get('natW',0), it.get('cw',0)) < 200 and max(it.get('natH',0), it.get('ch',0)) < 200:
-                            continue
-                        candidates = [it.get('src'), it.get('dataSrc'), pick_from_srcset(it.get('srcset'))]
-                        for cand in candidates:
-                            if cand and good_src(cand) and cand not in seen:
-                                seen.add(cand)
-                                urls.append(cand)
+                        fallback_items = sorted(fallback_items, key=_fallback_sort_key)
+                        seen_normalized = set()
+                        for item in fallback_items:
+                            for candidate in item.get('candidates') or []:
+                                normalized = _normalize_url(candidate, base_url)
+                                if normalized and normalized not in seen_normalized:
+                                    seen_normalized.add(normalized)
+                                    urls.append(normalized)
+                                    break
                 except Exception:
                     pass
 
             return urls
+
 
         async def extract_interactions(page: Union[Page, Frame]) -> Dict[str, str]:
             """提取互动数据：严格根据 .interact-container 中的分隔节点取数。

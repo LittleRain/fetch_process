@@ -1,12 +1,40 @@
 import asyncio
 import os
 import random
+from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, APIRequestContext
 
 import config
 from xhs_scraper import XhsScraper
 from feishu_client import FeishuClient
 from scrapers.wechat.scraper import WeChatArticleScraper
+
+
+def _is_within_last_month(post_time: str, window_days: int = 30) -> bool:
+    """判断给定的发布日期是否在最近 window_days 天内。"""
+    if not post_time:
+        return False
+    post_time = str(post_time).strip()
+    if not post_time:
+        return False
+
+    parse_formats = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"]
+    parsed = None
+    for fmt in parse_formats:
+        try:
+            parsed = datetime.strptime(post_time, fmt)
+            break
+        except ValueError:
+            continue
+
+    if not parsed:
+        return False
+
+    now = datetime.now()
+    if parsed > now:
+        # 未来时间视为有效，通常是时区/抓取偏差
+        return True
+    return parsed >= now - timedelta(days=window_days)
 
 async def main():
     """主函数，编排整个爬取和写入流程"""
@@ -152,6 +180,12 @@ async def main():
                                 valid_imgs = [imgs]
                             if not valid_imgs:
                                 continue
+
+                            if t_type == 'xhs_user_notes':
+                                post_time_str = note_details.get("post_time")
+                                if not _is_within_last_month(post_time_str):
+                                    print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
+                                    continue
 
                             await feishu_for_task.add_note(note_details)
                             sent_count += 1

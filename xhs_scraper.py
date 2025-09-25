@@ -2,7 +2,13 @@
 import asyncio
 import random
 import re
-from playwright.async_api import Page, BrowserContext, Frame
+from playwright.async_api import (
+    Page,
+    BrowserContext,
+    Frame,
+    Error as PlaywrightError,
+    TimeoutError as PlaywrightTimeoutError,
+)
 from urllib.parse import urlparse, urlunparse, urljoin
 from typing import List, Dict, Optional, Union
 
@@ -19,6 +25,35 @@ class XhsScraper:
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """)
 
+    async def _goto_with_retry(self, url: str, *, wait_until: str = "domcontentloaded", retries: int = 3):
+        """对 goto 进行重试封装，处理小红书页面偶发的导航抢占。"""
+        if not self.page:
+            await self.init_page()
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max(1, retries) + 1):
+            try:
+                await self.page.goto(url, wait_until=wait_until)
+                return
+            except (PlaywrightTimeoutError, PlaywrightError) as exc:
+                msg = str(exc) if exc else ""
+                interrupt = "is interrupted by another navigation" in msg
+                timed_out = isinstance(exc, PlaywrightTimeoutError)
+                if attempt < retries and (interrupt or timed_out):
+                    print(f"导航到 {url} 未完成，原因: {msg or exc.__class__.__name__}。第 {attempt} 次重试...")
+                    try:
+                        await self.page.wait_for_load_state("load")
+                    except Exception:
+                        pass
+                    await self.page.wait_for_timeout(800)
+                    last_error = exc
+                    continue
+                last_error = exc
+                break
+
+        if last_error:
+            raise last_error
+
     async def close(self):
         """关闭页面"""
         if self.page and not self.page.is_closed():
@@ -33,7 +68,7 @@ class XhsScraper:
         
         print("正在检查登录状态...")
         # 访问一个需要登录才能正常显示的页面
-        await self.page.goto("https://www.xiaohongshu.com/explore", wait_until="domcontentloaded")
+        await self._goto_with_retry("https://www.xiaohongshu.com/explore")
         await self.page.wait_for_timeout(random.randint(2000, 4000))
 
         # 寻找登录后才会出现的元素，例如首页的 '关注' '发现' tab
@@ -58,7 +93,7 @@ class XhsScraper:
             await self.init_page()
 
         print(f"正在访问用户主页: {user_url}")
-        await self.page.goto(user_url, wait_until="domcontentloaded")
+        await self._goto_with_retry(user_url)
 
         # 等待笔记的父容器加载完成（用户主页用 #userPostedFeeds 更稳）
         feeds_container_selector = "div#userPostedFeeds.feeds-container" if "/user/profile/" in user_url else "div.feeds-container"
@@ -425,7 +460,7 @@ class XhsScraper:
                                             except Exception:
                                                 restore_url = None
                                             
-                                            await self.page.goto(target_url, wait_until="domcontentloaded")
+                                            await self._goto_with_retry(target_url)
                                             try:
                                                 await self.page.wait_for_load_state("networkidle")
                                             except Exception:
@@ -484,7 +519,7 @@ class XhsScraper:
                                         # 兜底：同页跳转到详情链接再抓取（最后手段）
                                         direct_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
                                         
-                                        await self.page.goto(direct_url, wait_until="domcontentloaded")
+                                        await self._goto_with_retry(direct_url)
                                         try:
                                             await self.page.wait_for_load_state("networkidle")
                                         except Exception:
@@ -545,7 +580,7 @@ class XhsScraper:
                                         except Exception:
                                             restore_url = None
                                         
-                                        await self.page.goto(same_page_target, wait_until="domcontentloaded")
+                                        await self._goto_with_retry(same_page_target)
                                         try:
                                             await self.page.wait_for_load_state("networkidle")
                                         except Exception:
@@ -556,31 +591,29 @@ class XhsScraper:
                                         raise Exception("skip_overlay_processing")
                                     except Exception:
                                         # 失败再尝试使用 content_frame
+                                        overlay_frame = None
+                                        try:
+                                            for _ in range(40):
+                                                overlay_frame = await iframe_el.content_frame()
+                                                if overlay_frame:
+                                                    break
+                                                await self.page.wait_for_timeout(250)
+                                        except Exception:
                                             overlay_frame = None
+                                        if not overlay_frame:
                                             try:
-                                                for _ in range(40):
-                                                    overlay_frame = await iframe_el.content_frame()
-                                                    if overlay_frame:
-                                                        break
-                                                    await self.page.wait_for_timeout(250)
+                                                overlay_frame = await _find_overlay_frame()
                                             except Exception:
                                                 overlay_frame = None
-                                            if not overlay_frame:
-                                                try:
-                                                    overlay_frame = await _find_overlay_frame()
-                                                except Exception:
-                                                    overlay_frame = None
-                                            if overlay_frame:
-                                                
-                                                used_frame = overlay_frame
-                                                try:
-                                                    await overlay_frame.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=8000)
-                                                except Exception:
-                                                    pass
-                                                pg = used_frame
-                                                clicked_navigation = True
-                                                
-                                            else:
+                                        if overlay_frame:
+                                            used_frame = overlay_frame
+                                            try:
+                                                await overlay_frame.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=8000)
+                                            except Exception:
+                                                pass
+                                            pg = used_frame
+                                            clicked_navigation = True
+                                        else:
                                                 # 最后再同页跳转
                                                 direct_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
                                                 
@@ -588,7 +621,7 @@ class XhsScraper:
                                                     restore_url = self.page.url
                                                 except Exception:
                                                     restore_url = None
-                                                await self.page.goto(direct_url, wait_until="domcontentloaded")
+                                                await self._goto_with_retry(direct_url)
                                                 try:
                                                     await self.page.wait_for_load_state("networkidle")
                                                 except Exception:
@@ -655,7 +688,7 @@ class XhsScraper:
                                             except Exception:
                                                 restore_url = None
                                             
-                                            await self.page.goto(same_page_target, wait_until="domcontentloaded")
+                                            await self._goto_with_retry(same_page_target)
                                             try:
                                                 await self.page.wait_for_load_state("networkidle")
                                             except Exception:
@@ -708,7 +741,7 @@ class XhsScraper:
                                                     restore_url = self.page.url
                                                 except Exception:
                                                     restore_url = None
-                                                await self.page.goto(direct_url, wait_until="domcontentloaded")
+                                                await self._goto_with_retry(direct_url)
                                                 try:
                                                     await self.page.wait_for_load_state("networkidle")
                                                 except Exception:
@@ -723,7 +756,7 @@ class XhsScraper:
             if not clicked_navigation:
                 # 兜底：直接跳转到详情URL
                 print("点击未触发导航，使用 goto 兜底跳转详情页...")
-                await self.page.goto(note_info['url'], wait_until="domcontentloaded")
+                await self._goto_with_retry(note_info['url'])
                 pg = self.page
 
             # 等待渲染完成：Page 等待 networkidle；Frame 则直接等待一段时间
@@ -1378,7 +1411,7 @@ class XhsScraper:
                     elif pg is self.page:
                         try:
                             if restore_url:
-                                await self.page.goto(restore_url, wait_until="domcontentloaded")
+                                await self._goto_with_retry(restore_url)
                                 try:
                                     await self.page.wait_for_load_state("networkidle")
                                 except Exception:
@@ -1391,7 +1424,7 @@ class XhsScraper:
                     if pg is self.page:
                         try:
                             if restore_url:
-                                await self.page.goto(restore_url, wait_until="domcontentloaded")
+                                await self._goto_with_retry(restore_url)
                                 try:
                                     await self.page.wait_for_load_state("networkidle")
                                 except Exception:

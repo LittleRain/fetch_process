@@ -228,6 +228,14 @@ class FeishuClient:
         # 明确指定 JSON 提交，避免被当作表单编码
         headers = {**headers, "Content-Type": "application/json; charset=utf-8"}
         payload = {"fields": fields}
+        print(f"[FeishuClient] 准备写入: app_token={self.base_app_token} table_id={self.table_id}")
+        print(f"[FeishuClient] 字段映射: {self.field_mapping}")
+        print(f"[FeishuClient] 提交字段 keys: {list(fields.keys())}")
+        try:
+            import json as _json_debug
+            print(f"[FeishuClient] payload preview: {_json_debug.dumps(payload, ensure_ascii=False)}")
+        except Exception:
+            pass
         # 移除飞书请求详情打印
 
         # 移除飞书请求/响应打印函数
@@ -256,6 +264,7 @@ class FeishuClient:
                 break
 
             # 若为数字字段格式错误，自动将报错字段转换为数字后重试（最多2次）
+            print(f"[FeishuClient] 写入失败第 {attempt} 次, status={response.status}, body={resp_text}")
             msg = (data.get('msg') if isinstance(data, dict) else "") or ""
             err = (data.get('error') if isinstance(data, dict) else {}) or {}
             err_msg = err.get('message', '') if isinstance(err, dict) else ''

@@ -39,7 +39,7 @@ XHS_TARGET_URLS = [
 
 # 要爬取的微博主页URL列表，可以配置多个
 WEIBO_TARGET_URLS = [
-    "https://weibo.com/u/7517194482",
+    "https://weibo.com/u/5638891142",
 ]
 
 # Playwright 会话状态文件路径，用于保存登录状态

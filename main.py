@@ -198,7 +198,7 @@ async def main():
 
                             if t_type == 'weibo_home':
                                 summary_post_time = note_info.get('post_time')
-                                if summary_post_time and not _is_within_last_days(summary_post_time, 7):
+                                if summary_post_time and not _is_within_last_days(summary_post_time, 30):
                                     print(f"[过期] 跳过 id={note_id_val} post_time={summary_post_time}")
                                     continue
 
@@ -233,7 +233,7 @@ async def main():
                                     continue
                             elif t_type == 'weibo_home':
                                 post_time_str = note_details.get("post_time")
-                                if not _is_within_last_days(post_time_str, 7):
+                                if not _is_within_last_days(post_time_str, 30):
                                     print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
                                     continue
 

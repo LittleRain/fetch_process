@@ -17,7 +17,12 @@ class FeishuClient:
         # 允许按任务覆盖 app_token、table_id、字段映射
         self.base_app_token = app_token or config.FEISHU_BASE_APP_TOKEN
         self.table_id = table_id or config.FEISHU_BASE_TABLE_ID
-        self.field_mapping = field_mapping or config.FEISHU_FIELD_MAPPING
+        if field_mapping is None:
+            self.field_mapping = getattr(config, "FEISHU_FIELD_MAPPING", {})
+        elif isinstance(field_mapping, str):
+            self.field_mapping = getattr(config, field_mapping, {}) or {}
+        else:
+            self.field_mapping = field_mapping
         self._tenant_access_token = ""
         self._token_expiry_time = 0
         self.request_context = request_context
@@ -163,6 +168,8 @@ class FeishuClient:
         filter_param = f'''CurrentValue.[{self.field_mapping["note_id"]}]="{note_id}"'''
         encoded_filter = quote(filter_param)
         url = f"{self.BASE_URL}/bitable/v1/apps/{self.base_app_token}/tables/{self.table_id}/records?filter={encoded_filter}&page_size=1"
+
+        print(f"[FeishuClient] 查询去重: app_token={self.base_app_token} table_id={self.table_id} note_id={note_id}")
         
         headers = await self._get_auth_headers()
         response = await self.request_context.get(url, headers=headers)

@@ -8,9 +8,10 @@ import config
 from xhs_scraper import XhsScraper
 from feishu_client import FeishuClient
 from scrapers.wechat.scraper import WeChatArticleScraper
+from scrapers.weibo.scraper import WeiboHomeScraper
 
 
-def _is_within_last_month(post_time: str, window_days: int = 30) -> bool:
+def _is_within_last_days(post_time: str, window_days: int) -> bool:
     """判断给定的发布日期是否在最近 window_days 天内。"""
     if not post_time:
         return False
@@ -36,15 +37,14 @@ def _is_within_last_month(post_time: str, window_days: int = 30) -> bool:
         return True
     return parsed >= now - timedelta(days=window_days)
 
+
+def _is_within_last_month(post_time: str) -> bool:
+    """保留兼容函数，判断是否在最近30天内。"""
+    return _is_within_last_days(post_time, 30)
+
 async def main():
     """主函数，编排整个爬取和写入流程"""
-    print("====== 开始执行小红书笔记抓取任务 ======")
-
-    # 1. 检查登录会话文件是否存在
-    if not os.path.exists(config.XHS_AUTH_STATE_PATH):
-        print(f"错误：未找到会话文件 {config.XHS_AUTH_STATE_PATH}。")
-        print("请先运行 python login_helper.py 进行手动登录以生成会话文件。")
-        return
+    print("====== 开始执行抓取任务 ======")
 
     async with async_playwright() as p:
         # 创建一个统一的异步网络请求上下文
@@ -58,52 +58,73 @@ async def main():
             await request_context.dispose()
             return
 
+        tasks = getattr(config, 'TASKS', [])
+        if not tasks:
+            # 兼容旧配置：按单一小红书任务执行
+            tasks = [{
+                "type": "xhs_user_notes",
+                "sink": "xhs_default",
+                "params": {
+                    "urls": config.XHS_TARGET_URLS,
+                    "per_account_limit": 10,
+                    "scrolls": 1,
+                }
+            }]
+
+        xhs_task_types = {'xhs_user_notes', 'xhs_home'}
+        supported_types = {
+            'xhs_user_notes',
+            'xhs_home',
+            'wechat_articles',
+            'weibo_home',
+        }
+        has_xhs_tasks = any(task.get('type') in xhs_task_types for task in tasks)
+
+        if has_xhs_tasks and not os.path.exists(config.XHS_AUTH_STATE_PATH):
+            print(f"错误：未找到会话文件 {config.XHS_AUTH_STATE_PATH}。")
+            print("请先运行 python login_helper.py 进行手动登录以生成会话文件。")
+            await request_context.dispose()
+            return
+
         # 启动浏览器：本地默认有头，服务器/CI可通过 XHS_HEADLESS 切换
         browser = await p.chromium.launch(
             headless=config.XHS_HEADLESS,
             args=["--disable-blink-features=AutomationControlled", "--start-maximized"]
         )
-        # 加载保存的会话状态，并模拟桌面端环境
-        context = await browser.new_context(
-            storage_state=config.XHS_AUTH_STATE_PATH,
-            no_viewport=True,
-            user_agent=(
+        context_kwargs = {
+            "no_viewport": True,
+            "user_agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/126.0.0.0 Safari/537.36"
-            )
-        )
+            ),
+        }
+        if has_xhs_tasks:
+            context_kwargs["storage_state"] = config.XHS_AUTH_STATE_PATH
+        context = await browser.new_context(**context_kwargs)
         
         scraper = XhsScraper(context)
         wechat_scraper = WeChatArticleScraper(context)
+        weibo_scraper = WeiboHomeScraper(context)
 
         try:
-            # 2. 检查登录状态是否有效
-            if not await scraper.check_login_status():
-                print("错误：小红书登录状态已失效。")
-                print("请重新运行 python login_helper.py 更新会话文件。")
-                return
-
-            # 3. 读取任务并执行（支持不同渠道写入不同表格）
             summary_counts = {}
-            tasks = getattr(config, 'TASKS', [])
-            if not tasks:
-                # 兼容旧配置：按单一小红书任务执行
-                tasks = [{
-                    "type": "xhs_user_notes",
-                    "sink": "xhs_default",
-                    "params": {
-                        "user_urls": config.XHS_TARGET_URLS,
-                        "per_account_limit": 10,
-                        "scrolls": 1,
-                    }
-                }]
-
+            xhs_login_checked = False
             for task in tasks:
                 t_type = task.get('type')
-                if t_type not in ('xhs_user_notes', 'wechat_articles'):
+                if t_type not in supported_types:
                     print(f"跳过不支持的任务类型: {t_type}")
                     continue
+                if t_type in xhs_task_types and not xhs_login_checked:
+                    try:
+                        if not await scraper.check_login_status():
+                            print("错误：小红书登录状态已失效。")
+                            print("请重新运行 python login_helper.py 更新会话文件。")
+                            return
+                        xhs_login_checked = True
+                    except Exception as e:
+                        print(f"检查小红书登录状态时出错: {e}")
+                        return
 
                 sink_key = task.get('sink') or 'xhs_default'
                 sink_conf = config.FEISHU_SINKS.get(sink_key, {})
@@ -120,17 +141,28 @@ async def main():
                     continue
 
                 params = task.get('params', {})
-                user_urls = params.get('user_urls') or []
+                urls = params.get('urls') or params.get('user_urls') or []
                 per_account_limit = int(params.get('per_account_limit') or 10)
+                scrolls = int(params.get('scrolls') or 1)
 
-                for user_url in user_urls:
+                for user_url in urls:
                     print(f"\n--- 开始处理用户: {user_url} ---")
                     try:
-                        if t_type == 'xhs_user_notes':
-                            notes = await scraper.scrape_user_notes(user_url, max_notes=max(40, per_account_limit * 4))
-                        else:
+                        if t_type in ('xhs_user_notes', 'xhs_home'):
+                            notes = await scraper.scrape_user_notes(
+                                user_url,
+                                max_notes=max(40, per_account_limit * 4),
+                                scrolls=scrolls,
+                            )
+                        elif t_type == 'wechat_articles':
                             # wechat_articles：这里 user_url 代表公众号ID或主页URL
                             notes = await wechat_scraper.scrape_account_articles(user_url, max_articles=max(40, per_account_limit * 4))
+                        else:
+                            notes = await weibo_scraper.scrape_home_posts(
+                                user_url,
+                                max_posts=max(40, per_account_limit * 4),
+                                scrolls=scrolls,
+                            )
                         if not notes:
                             print("未在该用户主页发现任何可用条目，或爬取失败。")
                             summary_counts[user_url] = 0
@@ -148,7 +180,12 @@ async def main():
                             break
                         try:
                             # 增量检查：判断笔记是否已存在
-                            note_id_key = 'note_id' if t_type == 'xhs_user_notes' else 'article_id'
+                            if t_type in ('xhs_user_notes', 'xhs_home'):
+                                note_id_key = 'note_id'
+                            elif t_type == 'wechat_articles':
+                                note_id_key = 'article_id'
+                            else:
+                                note_id_key = 'note_id'
                             note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
                             print(f"[去重检查] sink={sink_key} id={note_id_val} -> 查询飞书是否已存在...")
                             exists = await feishu_for_task.check_note_exists(note_id_val)
@@ -159,11 +196,19 @@ async def main():
                             else:
                                 print(f"[需要抓详情] id={note_id_val}")
 
+                            if t_type == 'weibo_home':
+                                summary_post_time = note_info.get('post_time')
+                                if summary_post_time and not _is_within_last_days(summary_post_time, 7):
+                                    print(f"[过期] 跳过 id={note_id_val} post_time={summary_post_time}")
+                                    continue
+
                             # 爬取笔记详情
-                            if t_type == 'xhs_user_notes':
+                            if t_type in ('xhs_user_notes', 'xhs_home'):
                                 note_details = await scraper.scrape_note_details(note_info)
-                            else:
+                            elif t_type == 'wechat_articles':
                                 note_details = await wechat_scraper.scrape_article_details(note_info)
+                            else:
+                                note_details = await weibo_scraper.scrape_post_details(note_info)
                             if not note_details:
                                 continue
 
@@ -181,9 +226,14 @@ async def main():
                             if not valid_imgs:
                                 continue
 
-                            if t_type == 'xhs_user_notes':
+                            if t_type in ('xhs_user_notes', 'xhs_home'):
                                 post_time_str = note_details.get("post_time")
-                                if not _is_within_last_month(post_time_str):
+                                if not _is_within_last_days(post_time_str, 30):
+                                    print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
+                                    continue
+                            elif t_type == 'weibo_home':
+                                post_time_str = note_details.get("post_time")
+                                if not _is_within_last_days(post_time_str, 7):
                                     print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
                                     continue
 
@@ -200,6 +250,8 @@ async def main():
         finally:
             # 确保所有资源被关闭
             await scraper.close()
+            await wechat_scraper.close()
+            await weibo_scraper.close()
             await browser.close()
             await request_context.dispose()
     

@@ -16,7 +16,8 @@ FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "oyWom5iYRryFnfUbee3SnfS
 # ===============================================================================
 # 多维表格的 App Token，在多维表格 URL 中可以找到，例如:
 # https://<your-domain>.feishu.cn/base/<THIS_IS_THE_APP_TOKEN>?table=<table_id>&view=<view_id>
-FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "GYnKbo7sIaHm5zseN4gc1NM0nzg")
+# FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "GYnKbo7sIaHm5zseN4gc1NM0nzg") #大杂烩
+FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "LDSjbNlMdadMlNsuFq6cli4Anlc") #抓取漫展官方情报
 
 # 多维表格的 Table ID，在多维表格 URL 中可以找到
 FEISHU_BASE_TABLE_ID = os.environ.get("FEISHU_BASE_TABLE_ID", "tbloiTbxqmYBdGiz")
@@ -31,6 +32,14 @@ XHS_TARGET_URLS = [
     "https://www.xiaohongshu.com/user/profile/5c2ef7bf000000000700e62b",
     "https://www.xiaohongshu.com/user/profile/5e5cc694000000000100bfc4",
     "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
+    
+    # "https://www.xiaohongshu.com/user/profile/66c81184000000001d033a99"
+    # "https://www.xiaohongshu.com/user/profile/65dc09e6000000000500dd6a"
+]
+
+# 要爬取的微博主页URL列表，可以配置多个
+WEIBO_TARGET_URLS = [
+    "https://weibo.com/u/7517194482",
 ]
 
 # Playwright 会话状态文件路径，用于保存登录状态
@@ -45,7 +54,7 @@ XHS_HEADLESS = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", 
 # 飞书多维表格字段映射
 # 请确保这里的键（key）与你在飞书表格中创建的列名（字段名）完全一致
 # ===============================================================================
-FEISHU_FIELD_MAPPING = {
+FEISHU_FIELD_MAPPING_XHS = {
     "note_id": "笔记ID",          # 笔记ID (单行文本)
     "content": "描述",        # 笔记内容 (多行文本)
     "images": "图片数组",             # 笔记图片 (附件)
@@ -60,6 +69,18 @@ FEISHU_FIELD_MAPPING = {
     "shares_count": "转发数",     # 转发数 (数字)
 }
 
+FEISHU_FIELD_MAPPING_WB = {
+    "note_id": "内容ID",          # 内容ID (单行文本)
+    "content": "描述",        # 笔记内容 (多行文本)
+    "images": "图片数组",             # 笔记图片 (附件)
+    "post_time": "发布时间",      # 发布时间 (日期)
+    "post_url": "内容链接",       # 内容链接 (URL)
+    "author_name": "作者",    # 作者名称 (单行文本)
+    "likes_count": "点赞数",      # 点赞数 (数字)
+    "comments_count": "评论数",   # 评论数 (数字)
+    "shares_count": "转发数",     # 转发数 (数字)
+}
+
 # ===============================================================================
 # 多渠道 -> 多飞书表格配置（可扩展）
 # key 为自定义的 sink 名称；每条任务可引用其中一个 sink 名称
@@ -69,7 +90,12 @@ FEISHU_SINKS = {
     "xhs_default": {
         "app_token": FEISHU_BASE_APP_TOKEN,
         "table_id": FEISHU_BASE_TABLE_ID,
-        "field_mapping": FEISHU_FIELD_MAPPING,
+        "field_mapping": FEISHU_FIELD_MAPPING_XHS,
+    },
+    "weibo_default": {
+        "app_token": FEISHU_BASE_APP_TOKEN,
+        "table_id": "tblisrHchFiWYU7f",
+        "field_mapping": FEISHU_FIELD_MAPPING_WB,
     },
     # 示例：微信渠道可以写入到另一张表（如需）
     # "wechat_default": {
@@ -86,13 +112,22 @@ FEISHU_SINKS = {
 # params: 渠道参数；xhs_user_notes 支持 user_urls、per_account_limit、scrolls
 # ===============================================================================
 TASKS = [
+    # {
+    #     "type": "xhs_user_notes",
+    #     "sink": "xhs_default",
+    #     "params": {
+    #         "urls": XHS_TARGET_URLS,
+    #         "per_account_limit": 10,
+    #         "scrolls": 2,
+    #     },
+    # },
     {
-        "type": "xhs_user_notes",
-        "sink": "xhs_default",
+        "type": "weibo_home",
+        "sink": "weibo_default",
         "params": {
-            "user_urls": XHS_TARGET_URLS,
+            "urls": WEIBO_TARGET_URLS,
             "per_account_limit": 10,
             "scrolls": 1,
         },
-    }
+    },
 ]

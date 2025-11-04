@@ -82,11 +82,12 @@ class XhsScraper:
             print("登录状态失效或未登录。")
             return False
 
-    async def scrape_user_notes(self, user_url: str, max_notes: int = 10) -> List[Dict]:
+    async def scrape_user_notes(self, user_url: str, max_notes: int = 10, scrolls: int = 1) -> List[Dict]:
         """
         从指定用户主页爬取最新的笔记列表。
         :param user_url: 用户主页 URL
         :param max_notes: 本次最多爬取的笔记数量
+        :param scrolls: 向下滚动次数，用于加载更多内容
         :return: 包含笔记基本信息的字典列表
         """
         if not self.page:
@@ -108,8 +109,8 @@ class XhsScraper:
             print("已保存截图 `debug_screenshot.png` 以供分析。")
             return []
 
-        # 模拟向下滚动以加载更多笔记（按需仅滚动 1 次）
-        for i in range(1): # 滚动1次
+        # 模拟向下滚动以加载更多笔记
+        for i in range(max(0, scrolls)):
             print(f"正在进行第 {i+1} 次向下滚动...")
             await self.page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
             await self.page.wait_for_timeout(random.randint(2500, 4000))
@@ -1383,6 +1384,7 @@ class XhsScraper:
                 "content": (content or "").strip(),
                 "images": unique_image_urls,
                 "post_time": post_time,
+                "platform": "小红书",
             })
 
             # 清理：

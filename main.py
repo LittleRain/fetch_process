@@ -145,6 +145,13 @@ async def main():
                 per_account_limit = int(params.get('per_account_limit') or 10)
                 scrolls = int(params.get('scrolls') or 1)
 
+                if t_type in ('xhs_user_notes', 'xhs_home'):
+                    note_id_key = 'note_id'
+                elif t_type == 'wechat_articles':
+                    note_id_key = 'article_id'
+                else:
+                    note_id_key = 'note_id'
+
                 for user_url in urls:
                     print(f"\n--- 开始处理用户: {user_url} ---")
                     try:
@@ -172,34 +179,59 @@ async def main():
                         summary_counts[user_url] = 0
                         continue
 
-                    sent_count = 0
+                    # 批量查询已存在的 note_id，避免逐条请求
+                    try:
+                        note_ids_for_check = []
+                        for note_info in notes:
+                            raw_id = note_info.get(note_id_key) or note_info.get('note_id')
+                            if raw_id is None:
+                                continue
+                            raw_id_str = str(raw_id).strip()
+                            if raw_id_str:
+                                note_ids_for_check.append(raw_id_str)
+                        existing_note_ids = await feishu_for_task.check_notes_exist_batch(note_ids_for_check)
+                        print(f"[批量去重] sink={sink_key} -> 待查 {len(note_ids_for_check)} 条, 已存在 {len(existing_note_ids)} 条")
+                    except Exception as e:
+                        print(f"[批量去重失败] sink={sink_key} 错误: {e}")
+                        existing_note_ids = set()
+                    existing_note_ids_normalized = {str(s).strip().lower() for s in existing_note_ids if isinstance(s, str)}
+
                     existed_count = 0
-                    total_candidates = len(notes) if notes else 0
+                    filtered_notes = []
                     for note_info in notes:
+                        note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
+                        note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
+                        if not note_id_val_str:
+                            print(f"[跳过] 未获取到 note_id 字段，原始={note_id_val}")
+                            continue
+                        note_id_val_lower = note_id_val_str.lower()
+                        if note_id_val_str in existing_note_ids or note_id_val_lower in existing_note_ids_normalized:
+                            existed_count += 1
+                            print(f"[已存在-批] 跳过 id={note_id_val_str}")
+                            continue
+                        filtered_notes.append(note_info)
+
+                    if not filtered_notes:
+                        summary_counts[user_url] = 0
+                        print(f"[批量去重] sink={sink_key} -> 无需处理新内容，结束账号 {user_url}")
+                        continue
+
+                    sent_count = 0
+                    total_candidates = len(filtered_notes)
+                    for note_info in filtered_notes:
                         if sent_count >= per_account_limit:
                             break
                         try:
-                            # 增量检查：判断笔记是否已存在
-                            if t_type in ('xhs_user_notes', 'xhs_home'):
-                                note_id_key = 'note_id'
-                            elif t_type == 'wechat_articles':
-                                note_id_key = 'article_id'
-                            else:
-                                note_id_key = 'note_id'
                             note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
-                            print(f"[去重检查] sink={sink_key} id={note_id_val} -> 查询飞书是否已存在...")
-                            exists = await feishu_for_task.check_note_exists(note_id_val)
-                            if exists:
-                                print(f"[已存在] 跳过 id={note_id_val}")
-                                existed_count += 1
+                            note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
+                            if not note_id_val_str:
                                 continue
-                            else:
-                                print(f"[需要抓详情] id={note_id_val}")
+                            print(f"[需要抓详情] id={note_id_val_str}")
 
                             if t_type == 'weibo_home':
                                 summary_post_time = note_info.get('post_time')
                                 if summary_post_time and not _is_within_last_days(summary_post_time, 30):
-                                    print(f"[过期] 跳过 id={note_id_val} post_time={summary_post_time}")
+                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
                                     continue
 
                             # 爬取笔记详情
@@ -229,15 +261,17 @@ async def main():
                             if t_type in ('xhs_user_notes', 'xhs_home'):
                                 post_time_str = note_details.get("post_time")
                                 if not _is_within_last_days(post_time_str, 30):
-                                    print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
+                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
                                     continue
                             elif t_type == 'weibo_home':
                                 post_time_str = note_details.get("post_time")
                                 if not _is_within_last_days(post_time_str, 30):
-                                    print(f"[过期] 跳过 id={note_id_val} post_time={post_time_str}")
+                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
                                     continue
 
                             await feishu_for_task.add_note(note_details)
+                            existing_note_ids.add(note_id_val_str)
+                            existing_note_ids_normalized.add(note_id_val_str.lower())
                             sent_count += 1
                             await asyncio.sleep(random.randint(5, 10))
                         except Exception as e:

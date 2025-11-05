@@ -16,7 +16,8 @@ class FeishuClient:
         self.app_secret = config.FEISHU_APP_SECRET
         # 允许按任务覆盖 app_token、table_id、字段映射
         self.base_app_token = app_token or config.FEISHU_BASE_APP_TOKEN
-        self.table_id = table_id or config.FEISHU_BASE_TABLE_ID
+        default_table_id = getattr(config, "FEISHU_BASE_TABLE_ID", None)
+        self.table_id = table_id or default_table_id
         if field_mapping is None:
             self.field_mapping = getattr(config, "FEISHU_FIELD_MAPPING", {})
         elif isinstance(field_mapping, str):
@@ -182,6 +183,106 @@ class FeishuClient:
             return data.get("data", {}).get("total", 0) > 0
         else:
             raise Exception(f"查询飞书记录失败: {data.get('msg')}")
+
+    async def check_notes_exist_batch(self, note_ids: List[str], *, chunk_size: int = 30) -> set[str]:
+        """批量检查多个 note_id 是否已存在，返回已存在的 note_id 集合。"""
+        if not note_ids:
+            return set()
+        field_name = self.field_mapping.get("note_id")
+        if not field_name:
+            raise Exception("字段映射中缺少 note_id -> 飞书字段的配置。")
+
+        # 去重并清理空值
+        normalized_ids: List[str] = []
+        seen = set()
+        for raw_id in note_ids:
+            if raw_id is None:
+                continue
+            nid = str(raw_id).strip()
+            if not nid or nid in seen:
+                continue
+            seen.add(nid)
+            normalized_ids.append(nid)
+
+        if not normalized_ids:
+            return set()
+
+        headers = await self._get_auth_headers()
+        headers = {**headers, "Content-Type": "application/json; charset=utf-8"}
+        existing_ids: set[str] = set()
+        search_url = f"{self.BASE_URL}/bitable/v1/apps/{self.base_app_token}/tables/{self.table_id}/records/search"
+        chunk_size = max(1, int(chunk_size))
+
+        for start in range(0, len(normalized_ids), chunk_size):
+            chunk = normalized_ids[start:start + chunk_size]
+            if not chunk:
+                continue
+            conditions = [
+                {
+                    "field_name": field_name,
+                    "operator": "is",
+                    "value": [nid],
+                }
+                for nid in chunk
+            ]
+            payload_base = {
+                "filter": {
+                    "conjunction": "or",
+                    "conditions": conditions,
+                },
+            }
+            page_token = None
+            while True:
+                payload = dict(payload_base)
+                if page_token:
+                    payload["page_token"] = page_token
+                resp = await self.request_context.post(
+                    search_url,
+                    headers=headers,
+                    data=_json.dumps(payload, ensure_ascii=False),
+                )
+                try:
+                    data = await resp.json()
+                except Exception:
+                    data = {}
+                if not resp.ok or data.get("code") != 0:
+                    break
+                records = (data.get("data") or {}).get("items") or (data.get("data") or {}).get("records") or []
+                for record in records:
+                    fields = record.get("fields") or {}
+                    value = fields.get(field_name)
+                    extracted: List[str] = []
+                    if isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                cand = item.get("text") or item.get("link") or item.get("value")
+                            else:
+                                cand = item
+                            if cand is None:
+                                continue
+                            cand_str = str(cand).strip()
+                            if cand_str:
+                                extracted.append(cand_str)
+                    elif isinstance(value, dict):
+                        cand = value.get("text") or value.get("link") or value.get("value")
+                        if cand is not None:
+                            cand_str = str(cand).strip()
+                            if cand_str:
+                                extracted.append(cand_str)
+                    elif value is not None:
+                        cand_str = str(value).strip()
+                        if cand_str:
+                            extracted.append(cand_str)
+                    for cand_str in extracted:
+                        existing_ids.add(cand_str)
+                has_more = (data.get("data") or {}).get("has_more")
+                if has_more:
+                    page_token = (data.get("data") or {}).get("page_token")
+                    if not page_token:
+                        break
+                else:
+                    break
+        return existing_ids
 
     async def add_note(self, note_data: Dict[str, Any]):
         """向多维表格中添加一条新的笔记记录"""

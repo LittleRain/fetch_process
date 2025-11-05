@@ -16,11 +16,8 @@ FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "oyWom5iYRryFnfUbee3SnfS
 # ===============================================================================
 # 多维表格的 App Token，在多维表格 URL 中可以找到，例如:
 # https://<your-domain>.feishu.cn/base/<THIS_IS_THE_APP_TOKEN>?table=<table_id>&view=<view_id>
-# FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "GYnKbo7sIaHm5zseN4gc1NM0nzg") #大杂烩
-FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "LDSjbNlMdadMlNsuFq6cli4Anlc") #抓取漫展官方情报
-
-# 多维表格的 Table ID，在多维表格 URL 中可以找到
-FEISHU_BASE_TABLE_ID = os.environ.get("FEISHU_BASE_TABLE_ID", "tbloiTbxqmYBdGiz")
+FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "GYnKbo7sIaHm5zseN4gc1NM0nzg") #漫展攻略
+# FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "LDSjbNlMdadMlNsuFq6cli4Anlc") #抓取漫展官方情报
 
 
 # ===============================================================================
@@ -28,10 +25,19 @@ FEISHU_BASE_TABLE_ID = os.environ.get("FEISHU_BASE_TABLE_ID", "tbloiTbxqmYBdGiz"
 # ===============================================================================
 # 要爬取的小红书用户主页URL列表，可以配置多个
 XHS_TARGET_URLS = [
+    ## 攻略
     "https://www.xiaohongshu.com/user/profile/67bd26f8000000000d00a18c",
     "https://www.xiaohongshu.com/user/profile/5c2ef7bf000000000700e62b",
+    "https://www.xiaohongshu.com/user/profile/677e61fb000000000801e050",
     "https://www.xiaohongshu.com/user/profile/5e5cc694000000000100bfc4",
     "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
+
+    ## 官方情报
+    # "https://www.xiaohongshu.com/user/profile/66270a52000000001700ecbf",
+    # "https://www.xiaohongshu.com/user/profile/66b026de000000001d033004",
+    # "https://www.xiaohongshu.com/user/profile/64d9e1bb00000000010052c7",
+    # "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77",
+    # "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31"
     
     # "https://www.xiaohongshu.com/user/profile/66c81184000000001d033a99"
     # "https://www.xiaohongshu.com/user/profile/65dc09e6000000000500dd6a"
@@ -40,6 +46,11 @@ XHS_TARGET_URLS = [
 # 要爬取的微博主页URL列表，可以配置多个
 WEIBO_TARGET_URLS = [
     "https://weibo.com/u/7517194482",
+    "https://weibo.com/u/3136375497",
+    "https://weibo.com/u/5638891142",
+    "https://weibo.com/u/7617585695",
+    "https://weibo.com/u/2462905490",
+    "https://weibo.com/u/6537754228"
 ]
 
 # Playwright 会话状态文件路径，用于保存登录状态
@@ -89,12 +100,13 @@ FEISHU_FIELD_MAPPING_WB = {
 FEISHU_SINKS = {
     "xhs_default": {
         "app_token": FEISHU_BASE_APP_TOKEN,
-        "table_id": FEISHU_BASE_TABLE_ID,
+        "table_id": "tbloiTbxqmYBdGiz", ##攻略
+        # "table_id": "tbl3fl5oaC1PNMeN", ##官方情报
         "field_mapping": FEISHU_FIELD_MAPPING_XHS,
     },
     "weibo_default": {
         "app_token": FEISHU_BASE_APP_TOKEN,
-        "table_id": "tblisrHchFiWYU7f",
+        "table_id": "tblisrHchFiWYU7f", ##官方情报
         "field_mapping": FEISHU_FIELD_MAPPING_WB,
     },
     # 示例：微信渠道可以写入到另一张表（如需）
@@ -112,22 +124,22 @@ FEISHU_SINKS = {
 # params: 渠道参数；xhs_user_notes 支持 user_urls、per_account_limit、scrolls
 # ===============================================================================
 TASKS = [
-    # {
-    #     "type": "xhs_user_notes",
-    #     "sink": "xhs_default",
-    #     "params": {
-    #         "urls": XHS_TARGET_URLS,
-    #         "per_account_limit": 10,
-    #         "scrolls": 2,
-    #     },
-    # },
     {
-        "type": "weibo_home",
-        "sink": "weibo_default",
+        "type": "xhs_user_notes",
+        "sink": "xhs_default",
         "params": {
-            "urls": WEIBO_TARGET_URLS,
+            "urls": XHS_TARGET_URLS,
             "per_account_limit": 10,
             "scrolls": 1,
         },
     },
+    # {
+    #     "type": "weibo_home",
+    #     "sink": "weibo_default",
+    #     "params": {
+    #         "urls": WEIBO_TARGET_URLS,
+    #         "per_account_limit": 10,
+    #         "scrolls": 1,
+    #     },
+    # },
 ]

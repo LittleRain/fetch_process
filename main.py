@@ -209,6 +209,9 @@ async def main():
                             existed_count += 1
                             print(f"[已存在-批] 跳过 id={note_id_val_str}")
                             continue
+                        if note_info.get('is_video'):
+                            print(f"[跳过] 视频内容 id={note_id_val_str}")
+                            continue
                         filtered_notes.append(note_info)
 
                     if not filtered_notes:
@@ -216,15 +219,17 @@ async def main():
                         print(f"[批量去重] sink={sink_key} -> 无需处理新内容，结束账号 {user_url}")
                         continue
 
-                    sent_count = 0
-                    total_candidates = len(filtered_notes)
+                    total_candidates = len(notes) if notes else 0
+                    successful_note_ids: list[str] = []
                     for note_info in filtered_notes:
-                        if sent_count >= per_account_limit:
+                        if len(successful_note_ids) >= per_account_limit:
                             break
                         try:
                             note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
                             note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
                             if not note_id_val_str:
+                                continue
+                            if note_info.get('is_video'):
                                 continue
                             print(f"[需要抓详情] id={note_id_val_str}")
 
@@ -272,11 +277,12 @@ async def main():
                             await feishu_for_task.add_note(note_details)
                             existing_note_ids.add(note_id_val_str)
                             existing_note_ids_normalized.add(note_id_val_str.lower())
-                            sent_count += 1
+                            successful_note_ids.append(note_id_val_str)
                             await asyncio.sleep(random.randint(5, 10))
                         except Exception as e:
                             print(f"处理笔记 {note_info.get('note_id')} 时发生严重错误: {e}")
 
+                    sent_count = len(successful_note_ids)
                     print(f"--- 用户 {user_url} 处理完毕，本次已发送 {sent_count}/{per_account_limit} 条 ---")
                     print(f"=== 小结: 候选 {total_candidates} 条 | 已存在 {existed_count} 条 | 新写入 {sent_count} 条 ===")
                     summary_counts[user_url] = sent_count
@@ -293,8 +299,11 @@ async def main():
     try:
         if 'summary_counts' in locals() and summary_counts:
             print("\n====== 发送汇总 ======")
+            total_sent = 0
             for u, c in summary_counts.items():
                 print(f"账号: {u} -> 发送 {c} 条")
+                total_sent += c
+            print(f"总计发送 {total_sent} 条")
     except Exception:
         pass
     print("\n====== 所有任务执行完毕 ======")

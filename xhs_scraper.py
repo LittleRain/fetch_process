@@ -280,11 +280,23 @@ class XhsScraper:
                 if note_id in seen_ids:
                     continue
                 seen_ids.add(note_id)
+                is_video = False
+                try:
+                    card = notes_locator.nth(orig_idx)
+                    if await card.count() > 0:
+                        try:
+                            icon_candidate = card.locator('.play-icon, .play-icon-new, .video-icon, .icon-play').first
+                            is_video = await icon_candidate.count() > 0
+                        except Exception:
+                            is_video = False
+                except Exception:
+                    is_video = False
                 scraped_notes.append({
                     "note_id": note_id,
                     "url": full_url,
                     "index": orig_idx,
                     "raw_href": raw_href,
+                    "is_video": is_video,
                 })
                 if len(scraped_notes) >= max_count:
                     break
@@ -311,11 +323,22 @@ class XhsScraper:
                     continue
                 seen_ids.add(note_id)
                 full_url = note_url if not note_url.startswith('/') else f"https://www.xiaohongshu.com{note_url}"
+                is_video = False
+                try:
+                    if await note_handle.count() > 0:
+                        try:
+                            icon_candidate = note_handle.locator('.play-icon, .play-icon-new, .video-icon, .icon-play').first
+                            is_video = await icon_candidate.count() > 0
+                        except Exception:
+                            is_video = False
+                except Exception:
+                    is_video = False
                 scraped_notes.append({
                     "note_id": note_id,
                     "url": full_url,
                     "index": idx,
                     "raw_href": note_url,
+                    "is_video": is_video,
                 })
                 if len(scraped_notes) >= max_count:
                     break
@@ -335,18 +358,16 @@ class XhsScraper:
 
         print(f"正在爬取笔记详情: {note_info['url']}")
 
-        # 优先尝试在当前用户主页通过“点击”进入详情（可能是同页导航或新标签页，或浮层 iframe）
-        pg: Union[Page, Frame] = self.page  # 默认在当前页
-        clicked_navigation = False
-        popup_page: Optional[Page] = None
-        extra_note_page: Optional[Page] = None
-        restore_url: Optional[str] = None
+        pg: Union[Page, Frame] = self.page
+        detail_page_to_close: Optional[Page] = None
+        try:
+            restore_url = pg.url
+        except Exception:
+            restore_url = None
 
         def _build_direct_note_url() -> Optional[str]:
-            """
-            返回用于新页直开的“正确链接”：直接使用 raw_href（包含 token 的真实路由），
-            如：/user/profile/<uid>/<note_id>?xsec_token=...。必要时补全域名。
-            """
+            """返回用于直开的“正确链接”：优先 raw_href（包含 token 的真实路由），
+            如：/user/profile/<uid>/<note_id>?xsec_token=...。必要时补全域名。"""
             try:
                 raw = note_info.get("raw_href") or note_info.get("url")
                 if not raw:
@@ -355,7 +376,6 @@ class XhsScraper:
                     return raw
                 if raw.startswith("/"):
                     return f"https://www.xiaohongshu.com{raw}"
-                # 其它相对形式兜底
                 return f"https://www.xiaohongshu.com/{raw}"
             except Exception:
                 return None
@@ -372,420 +392,36 @@ class XhsScraper:
                 return f"https://www.xiaohongshu.com/explore/{nid}{qs}"
             except Exception:
                 return None
-        
-        async def _find_overlay_frame() -> Optional[Frame]:
-            """在当前页面中扫描可能的浮层 frame（根据 URL 关键字判断）。"""
-            try:
-                for _ in range(30):
-                    for fr in self.page.frames:
-                        try:
-                            fu = getattr(fr, 'url', '') or ''
-                            if ('/explore/' in fu) or re.search(r"/user/profile/.+?/([A-Za-z0-9]{8,64})", fu or ''):
-                                return fr
-                        except Exception:
-                            continue
-                    await self.page.wait_for_timeout(250)
-            except Exception:
-                pass
+
+        target_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info.get("url")
+        if not target_url:
+            print(f"笔记 {note_info.get('note_id')} 缺少可访问的详情 URL，跳过。")
             return None
+
         try:
-            if self.page:
-                feeds_container_selector = "div.feeds-container"
-
-                # 1) 优先：按 raw_href 精确点击（更符合当前页面行为，常打开浮层）
-                if "raw_href" in note_info and note_info["raw_href"]:
-                    raw = note_info["raw_href"]
-                    raw_sel = f"{feeds_container_selector} a[href='{raw}']"
-                    if await self.page.locator(raw_sel).count() == 0 and raw.startswith("http"):
-                        try:
-                            from urllib.parse import urlparse
-                            p = urlparse(raw)
-                            raw_sel = f"{feeds_container_selector} a[href='{p.path}']"
-                        except Exception:
-                            pass
-                    if await self.page.locator(raw_sel).count() > 0:
-                        locator2 = self.page.locator(raw_sel).first
-                        try:
-                            await locator2.scroll_into_view_if_needed()
-                        except Exception:
-                            pass
-                        try:
-                            async with self.context.expect_page(timeout=3000) as pi2:
-                                await locator2.click(force=True)
-                            popup_page = await pi2.value
-                            pg = popup_page
-                            clicked_navigation = True
-                            print("raw_href 点击后捕获到新标签页。")
-                        except Exception:
-                            try:
-                                async with self.page.expect_navigation(timeout=3000):
-                                    await locator2.click(force=True)
-                                pg = self.page
-                                clicked_navigation = True
-                                print("raw_href 点击后发生同页导航。")
-                            except Exception:
-                                try:
-                                    await locator2.click(force=True)
-                                except Exception:
-                                    pass
-                                overlay_selector = "div.container[data-v-fc1041fa]"
-                                iframe_selector = f"{overlay_selector} iframe"
-                                try:
-                                    await self.page.wait_for_selector(overlay_selector, timeout=7000)
-                                    
-                                    try:
-                                        _ = await self.page.locator(overlay_selector).first.get_attribute("class")
-                                    except Exception:
-                                        pass
-                                    iframe_el = await self.page.wait_for_selector(iframe_selector, timeout=7000)
-                                    # 同时打印 attribute 与 property 的 src，便于调试
-                                    iframe_attr_src = None
-                                    iframe_prop_src = None
-                                    try:
-                                        iframe_attr_src = await iframe_el.get_attribute("src")
-                                        iframe_prop_src = await iframe_el.evaluate("el => el.src || ''")
-                                    except Exception:
-                                        pass
-                                    # 优先按 iframe 的 prop/src 同页跳转抓取，避免空 frame
-                                    try:
-                                        target_url = None
-                                        if iframe_prop_src and not iframe_prop_src.startswith('about:'):
-                                            target_url = iframe_prop_src
-                                        elif iframe_attr_src and not iframe_attr_src.startswith('about:'):
-                                            target_url = iframe_attr_src
-                                        else:
-                                            target_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
-                                        if target_url:
-                                            try:
-                                                restore_url = self.page.url
-                                            except Exception:
-                                                restore_url = None
-                                            
-                                            await self._goto_with_retry(target_url)
-                                            try:
-                                                await self.page.wait_for_load_state("networkidle")
-                                            except Exception:
-                                                pass
-                                            pg = self.page
-                                            clicked_navigation = True
-                                            # 跳过后续 overlay_frame 处理
-                                            raise Exception("skip_overlay_processing")
-                                    except Exception:
-                                        pass
-                                    # 优先使用浮层 content_frame 抓取，避免跳转导致上下文丢失
-                                    if clicked_navigation:
-                                        raise Exception("skip_overlay_processing")
-                                    overlay_frame = None
-                                    try:
-                                        for _ in range(40):  # 最长 ~10s 等待浮层加载
-                                            overlay_frame = await iframe_el.content_frame()
-                                            if overlay_frame:
-                                                break
-                                            await self.page.wait_for_timeout(250)
-                                    except Exception:
-                                        if clicked_navigation:
-                                            raise Exception("skip_overlay_processing")
-                                        overlay_frame = None
-                                    if not overlay_frame:
-                                        try:
-                                            overlay_frame = await _find_overlay_frame()
-                                        except Exception:
-                                            if clicked_navigation:
-                                                raise Exception("skip_overlay_processing")
-                                            overlay_frame = None
-                                    if overlay_frame:
-                                        try:
-                                            _ = overlay_frame.url
-                                        except Exception:
-                                            pass
-                                        used_frame = overlay_frame
-                                        try:
-                                            await overlay_frame.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=8000)
-                                        except Exception:
-                                            # 若顶层 frame 未出现内容，尝试其子 frame
-                                            try:
-                                                for nf in overlay_frame.child_frames:
-                                                    try:
-                                                        await nf.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=2000)
-                                                        used_frame = nf
-                                                        break
-                                                    except Exception:
-                                                        continue
-                                            except Exception:
-                                                pass
-                                        pg = used_frame
-                                        clicked_navigation = True
-                                        
-                                    else:
-                                        # 兜底：同页跳转到详情链接再抓取（最后手段）
-                                        direct_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
-                                        
-                                        await self._goto_with_retry(direct_url)
-                                        try:
-                                            await self.page.wait_for_load_state("networkidle")
-                                        except Exception:
-                                            pass
-                                        pg = self.page
-                                        clicked_navigation = True
-                                except Exception:
-                                    pass
-
-                # 2) 其次：按 note_id 片段匹配
-                if not clicked_navigation and "note_id" in note_info:
-                    note_anchor_sel = f"{feeds_container_selector} a[href*='{note_info['note_id']}']"
-                    print(f"尝试通过选择器点击进入详情(按 note_id 片段): {note_anchor_sel}")
-                    if await self.page.locator(note_anchor_sel).count() > 0:
-                        locator = self.page.locator(note_anchor_sel).first
-                        try:
-                            await locator.scroll_into_view_if_needed()
-                        except Exception:
-                            pass
-                        try:
-                            async with self.context.expect_page(timeout=3000) as pi:
-                                await locator.click(force=True)
-                            popup_page = await pi.value
-                            pg = popup_page
-                            clicked_navigation = True
-                        except Exception:
-                            try:
-                                async with self.page.expect_navigation(timeout=3000):
-                                    await locator.click(force=True)
-                                pg = self.page
-                                clicked_navigation = True
-                            except Exception:
-                                try:
-                                    await locator.click(force=True)
-                                except Exception:
-                                    pass
-                                overlay_selector = "div.container[data-v-fc1041fa]"
-                                iframe_selector = f"{overlay_selector} iframe"
-                                try:
-                                    await self.page.wait_for_selector(overlay_selector, timeout=7000)
-                                    iframe_el = await self.page.wait_for_selector(iframe_selector, timeout=7000)
-                                    try:
-                                        iframe_attr_src = await iframe_el.get_attribute("src")
-                                        iframe_prop_src = await iframe_el.evaluate("el => el.src || ''")
-                                    except Exception:
-                                        pass
-                                    # 优先使用 iframe 的 prop src/attr src 进行同页跳转抓取
-                                    try:
-                                        same_page_target = (
-                                            (iframe_prop_src if iframe_prop_src and not iframe_prop_src.startswith('about:') else None) or
-                                            (iframe_attr_src if iframe_attr_src and not iframe_attr_src.startswith('about:') else None) or
-                                            _build_explore_url_with_query() or
-                                            _build_direct_note_url() or
-                                            note_info['url']
-                                        )
-                                        try:
-                                            restore_url = self.page.url
-                                        except Exception:
-                                            restore_url = None
-                                        
-                                        await self._goto_with_retry(same_page_target)
-                                        try:
-                                            await self.page.wait_for_load_state("networkidle")
-                                        except Exception:
-                                            pass
-                                        pg = self.page
-                                        clicked_navigation = True
-                                        # 直接跳过后续 overlay_frame 处理
-                                        raise Exception("skip_overlay_processing")
-                                    except Exception:
-                                        # 失败再尝试使用 content_frame
-                                        overlay_frame = None
-                                        try:
-                                            for _ in range(40):
-                                                overlay_frame = await iframe_el.content_frame()
-                                                if overlay_frame:
-                                                    break
-                                                await self.page.wait_for_timeout(250)
-                                        except Exception:
-                                            overlay_frame = None
-                                        if not overlay_frame:
-                                            try:
-                                                overlay_frame = await _find_overlay_frame()
-                                            except Exception:
-                                                overlay_frame = None
-                                        if overlay_frame:
-                                            used_frame = overlay_frame
-                                            try:
-                                                await overlay_frame.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=8000)
-                                            except Exception:
-                                                pass
-                                            pg = used_frame
-                                            clicked_navigation = True
-                                        else:
-                                                # 最后再同页跳转
-                                                direct_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
-                                                
-                                                try:
-                                                    restore_url = self.page.url
-                                                except Exception:
-                                                    restore_url = None
-                                                await self._goto_with_retry(direct_url)
-                                                try:
-                                                    await self.page.wait_for_load_state("networkidle")
-                                                except Exception:
-                                                    pass
-                                                pg = self.page
-                                                clicked_navigation = True
-                                except Exception:
-                                    pass
-
-                # 3) 再次：按 index 兜底点击
-                if not clicked_navigation and "index" in note_info:
-                    print("按 raw_href/note_id 都失败，尝试按索引点击...")
-                    try:
-                        anchors = self.page.locator(
-                            f"{feeds_container_selector} a.cover.mask.ld, "
-                            f"{feeds_container_selector} a.cover.mask, "
-                            f"{feeds_container_selector} a.cover.ld, "
-                            f"{feeds_container_selector} a.cover"
-                        )
-                        if await anchors.count() > note_info["index"]:
-                            idx_locator = anchors.nth(note_info["index"])
-                            try:
-                                await idx_locator.scroll_into_view_if_needed()
-                            except Exception:
-                                pass
-                            try:
-                                async with self.context.expect_page(timeout=3000) as pi2:
-                                    await idx_locator.click(force=True)
-                                popup_page = await pi2.value
-                                pg = popup_page
-                                clicked_navigation = True
-                            except Exception:
-                                try:
-                                    async with self.page.expect_navigation(timeout=3000):
-                                        await idx_locator.click(force=True)
-                                    pg = self.page
-                                    clicked_navigation = True
-                                except Exception:
-                                    try:
-                                        await idx_locator.click(force=True)
-                                    except Exception:
-                                        pass
-                                    overlay_selector = "div.container[data-v-fc1041fa]"
-                                    iframe_selector = f"{overlay_selector} iframe"
-                                    try:
-                                        await self.page.wait_for_selector(overlay_selector, timeout=7000)
-                                        iframe_el = await self.page.wait_for_selector(iframe_selector, timeout=7000)
-                                        try:
-                                            iframe_attr_src = await iframe_el.get_attribute("src")
-                                            iframe_prop_src = await iframe_el.evaluate("el => el.src || ''")
-                                        except Exception:
-                                            pass
-                                        # 优先使用 iframe 的 prop src/attr src 进行同页跳转抓取
-                                        same_page_target = (
-                                            _build_explore_url_with_query() or
-                                            (iframe_prop_src if iframe_prop_src and not iframe_prop_src.startswith('about:') else None) or
-                                            (iframe_attr_src if iframe_attr_src and not iframe_attr_src.startswith('about:') else None) or
-                                            _build_direct_note_url() or
-                                            note_info['url']
-                                        )
-                                        try:
-                                            try:
-                                                restore_url = self.page.url
-                                            except Exception:
-                                                restore_url = None
-                                            
-                                            await self._goto_with_retry(same_page_target)
-                                            try:
-                                                await self.page.wait_for_load_state("networkidle")
-                                            except Exception:
-                                                pass
-                                            pg = self.page
-                                            clicked_navigation = True
-                                        except Exception:
-                                            # 失败再尝试使用 content_frame
-                                            overlay_frame = None
-                                            try:
-                                                for _ in range(40):
-                                                    overlay_frame = await iframe_el.content_frame()
-                                                    if overlay_frame:
-                                                        break
-                                                    await self.page.wait_for_timeout(250)
-                                            except Exception:
-                                                overlay_frame = None
-                                            if not overlay_frame:
-                                                try:
-                                                    overlay_frame = await _find_overlay_frame()
-                                                except Exception:
-                                                    overlay_frame = None
-                                            if overlay_frame:
-                                                try:
-                                                    _ = overlay_frame.url
-                                                except Exception:
-                                                    pass
-                                                used_frame = overlay_frame
-                                                try:
-                                                    await overlay_frame.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=8000)
-                                                except Exception:
-                                                    try:
-                                                        for nf in overlay_frame.child_frames:
-                                                            try:
-                                                                await nf.wait_for_selector("article, .slider-container, #detail-desc, .note-desc, .note-content, .desc", timeout=2000)
-                                                                used_frame = nf
-                                                                break
-                                                            except Exception:
-                                                                continue
-                                                    except Exception:
-                                                        pass
-                                                pg = used_frame
-                                                clicked_navigation = True
-                                                
-                                            else:
-                                                # 最后再同页跳转
-                                                direct_url = _build_explore_url_with_query() or _build_direct_note_url() or note_info['url']
-                                                
-                                                try:
-                                                    restore_url = self.page.url
-                                                except Exception:
-                                                    restore_url = None
-                                                await self._goto_with_retry(direct_url)
-                                                try:
-                                                    await self.page.wait_for_load_state("networkidle")
-                                                except Exception:
-                                                    pass
-                                                pg = self.page
-                                                clicked_navigation = True
-                                    except Exception:
-                                        print("索引点击也失败。")
-                    except Exception as ie:
-                        print(f"索引点击过程异常: {ie}")
-
-            if not clicked_navigation:
-                # 兜底：直接跳转到详情URL
-                print("点击未触发导航，使用 goto 兜底跳转详情页...")
-                await self._goto_with_retry(note_info['url'])
-                pg = self.page
-
-            # 等待渲染完成：Page 等待 networkidle；Frame 则直接等待一段时间
+            await self._goto_with_retry(target_url)
+            pg = self.page
             try:
-                # 等待详情核心元素出现
-                try:
-                    await pg.wait_for_selector("article, .slider-container, img.note-slider-img, #detail-desc, .note-desc, .note-content, .desc", timeout=12000)
-                except Exception:
-                    pass
-                if isinstance(pg, Page):
-                    try:
-                        await pg.wait_for_load_state("networkidle")
-                    except Exception:
-                        pass
-                await pg.wait_for_timeout(random.randint(2000, 3500))
-                # 轻微滚动以触发图片懒加载
-                try:
-                    for _ in range(4):
-                        await pg.evaluate("window.scrollBy(0, Math.max(300, window.innerHeight))")
-                        await pg.wait_for_timeout(700)
-                except Exception:
-                    pass
+                await pg.wait_for_selector(
+                    "article, .slider-container, img.note-slider-img, #detail-desc, .note-desc, .note-content, .desc",
+                    timeout=12000,
+                )
             except Exception:
                 pass
-
-        except Exception:
-            # 导航/等待阶段的兜底，不阻塞后续解析流程
-            pass
+            try:
+                await pg.wait_for_load_state("networkidle")
+            except Exception:
+                pass
+            await pg.wait_for_timeout(random.randint(2000, 3500))
+            try:
+                for _ in range(4):
+                    await pg.evaluate("window.scrollBy(0, Math.max(300, window.innerHeight))")
+                    await pg.wait_for_timeout(700)
+            except Exception:
+                pass
+        except Exception as nav_err:
+            print(f"导航至详情页失败: {nav_err}")
+            return None
 
         # 选择器候选（页面经常改版，保留多套兜底）
         title_candidates = [
@@ -1278,6 +914,7 @@ class XhsScraper:
                 if fb_url:
                     try:
                         extra_note_page = await self.context.new_page()
+                        detail_page_to_close = extra_note_page
                         await extra_note_page.goto(fb_url, wait_until="domcontentloaded")
                         try:
                             await extra_note_page.wait_for_load_state("networkidle")
@@ -1292,7 +929,6 @@ class XhsScraper:
 
                         # 切换解析上下文为新开的详情页
                         pg = extra_note_page
-                        clicked_navigation = True
 
                         # 重新解析
                         content2 = await first_text(content_candidates, pg)
@@ -1387,54 +1023,25 @@ class XhsScraper:
                 "platform": "小红书",
             })
 
-            # 清理：
-            # - 弹窗打开：关闭弹窗
-            # - 浮层 iframe：关闭浮层（按 Esc 或点击关闭按钮）
-            # - 同页导航或兜底 goto：返回列表页（优先使用 restore_url，避免误回首页）
+            # 清理：详情抓取后返回用户主页，以便继续处理剩余笔记
             try:
-                if clicked_navigation:
-                    if popup_page is not None and not popup_page.is_closed():
-                        await popup_page.close()
-                    if extra_note_page is not None and not extra_note_page.is_closed():
-                        await extra_note_page.close()
-                    elif isinstance(pg, Frame):
-                        # 浮层关闭
-                        try:
-                            await self.page.keyboard.press("Escape")
-                            await self.page.wait_for_timeout(500)
-                        except Exception:
-                            pass
-                        try:
-                            close_btn = self.page.locator("div.container[data-v-fc1041fa] .close-icon").first
-                            if await close_btn.count() > 0:
-                                await close_btn.click()
-                        except Exception:
-                            pass
-                    elif pg is self.page:
-                        try:
-                            if restore_url:
-                                await self._goto_with_retry(restore_url)
-                                try:
-                                    await self.page.wait_for_load_state("networkidle")
-                                except Exception:
-                                    pass
-                            else:
-                                await self.page.go_back()
-                        except Exception:
-                            pass
+                if detail_page_to_close and not detail_page_to_close.is_closed():
+                    await detail_page_to_close.close()
+            except Exception:
+                pass
+
+            try:
+                if restore_url and restore_url != target_url:
+                    await self._goto_with_retry(restore_url)
+                    try:
+                        await self.page.wait_for_load_state("networkidle")
+                    except Exception:
+                        pass
                 else:
-                    if pg is self.page:
-                        try:
-                            if restore_url:
-                                await self._goto_with_retry(restore_url)
-                                try:
-                                    await self.page.wait_for_load_state("networkidle")
-                                except Exception:
-                                    pass
-                            else:
-                                await self.page.go_back()
-                        except Exception:
-                            pass
+                    try:
+                        await self.page.go_back()
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

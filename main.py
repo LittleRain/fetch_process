@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import re
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, APIRequestContext
 
@@ -15,27 +16,79 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
     """判断给定的发布日期是否在最近 window_days 天内。"""
     if not post_time:
         return False
-    post_time = str(post_time).strip()
-    if not post_time:
-        return False
-
-    parse_formats = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"]
-    parsed = None
-    for fmt in parse_formats:
-        try:
-            parsed = datetime.strptime(post_time, fmt)
-            break
-        except ValueError:
-            continue
-
-    if not parsed:
+    text = str(post_time).strip()
+    if not text:
         return False
 
     now = datetime.now()
-    if parsed > now:
-        # 未来时间视为有效，通常是时区/抓取偏差
+    lower_text = text.lower()
+
+    # 情况1：相对时间（分钟/小时内）视为近30天
+    if any(keyword in text for keyword in ("刚刚", "秒前", "分钟前", "小时内", "小时前")):
         return True
-    return parsed >= now - timedelta(days=window_days)
+
+    # 情况2：昨天/今天/前天 -> 视为近30天
+    if any(keyword in text for keyword in ("昨天", "今日", "今天", "前天")):
+        return True
+
+    # 情况3：匹配 mm-dd 或 mm-dd HH:mm
+    mmdd_match = re.match(
+        r"^\s*(\d{1,2})[-/.月](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?\s*$",
+        text,
+    )
+    if mmdd_match:
+        month = int(mmdd_match.group(1))
+        day = int(mmdd_match.group(2))
+        hour = int(mmdd_match.group(3) or 0)
+        minute = int(mmdd_match.group(4) or 0)
+        second = int(mmdd_match.group(5) or 0)
+        year = now.year
+        try:
+            dt = datetime(year, month, day, hour, minute, second)
+        except ValueError:
+            return False
+        # 处理跨年：如果日期在未来太多，视作上一年
+        if dt > now + timedelta(days=1):
+            try:
+                dt = dt.replace(year=year - 1)
+            except ValueError:
+                return False
+        if dt > now:
+            return True
+        return dt >= now - timedelta(days=window_days)
+
+    # 情况4：匹配 yyyy-mm-dd 或 yyyy-mm-dd HH:mm
+    ymd_match = re.match(
+        r"^\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?\s*$",
+        text,
+    )
+    if ymd_match:
+        year = int(ymd_match.group(1))
+        month = int(ymd_match.group(2))
+        day = int(ymd_match.group(3))
+        hour = int(ymd_match.group(4) or 0)
+        minute = int(ymd_match.group(5) or 0)
+        second = int(ymd_match.group(6) or 0)
+        try:
+            dt = datetime(year, month, day, hour, minute, second)
+        except ValueError:
+            return False
+        if dt > now:
+            return True
+        return dt >= now - timedelta(days=window_days)
+
+    # 情况5：尝试标准格式解析
+    parse_formats = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"]
+    for fmt in parse_formats:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            if parsed > now:
+                return True
+            return parsed >= now - timedelta(days=window_days)
+        except ValueError:
+            continue
+
+    return False
 
 
 def _is_within_last_month(post_time: str) -> bool:
@@ -209,7 +262,7 @@ async def main():
                             existed_count += 1
                             print(f"[已存在-批] 跳过 id={note_id_val_str}")
                             continue
-                        if note_info.get('is_video'):
+                        if note_info.get('is_video') and t_type not in ('weibo_home',):
                             print(f"[跳过] 视频内容 id={note_id_val_str}")
                             continue
                         filtered_notes.append(note_info)
@@ -229,7 +282,7 @@ async def main():
                             note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
                             if not note_id_val_str:
                                 continue
-                            if note_info.get('is_video'):
+                            if note_info.get('is_video') and t_type not in ('weibo_home',):
                                 continue
                             print(f"[需要抓详情] id={note_id_val_str}")
 
@@ -247,11 +300,13 @@ async def main():
                             else:
                                 note_details = await weibo_scraper.scrape_post_details(note_info)
                             if not note_details:
+                                print(f"[未写入] id={note_id_val_str} 原因=详情抓取失败")
                                 continue
 
                             # 如果内容为空，跳过写入
                             ctt = note_details.get("content")
                             if not ctt or not str(ctt).strip():
+                                print(f"[未写入] id={note_id_val_str} 原因=正文为空")
                                 continue
                             # 如果图片数组为空，跳过写入
                             imgs = note_details.get("images") or []
@@ -260,7 +315,9 @@ async def main():
                                 valid_imgs = [u for u in imgs if isinstance(u, str) and u.strip() and not u.startswith("data:")]
                             elif isinstance(imgs, str) and imgs.strip():
                                 valid_imgs = [imgs]
-                            if not valid_imgs:
+                            is_video_note = note_details.get("is_video") or note_info.get('is_video')
+                            if not valid_imgs and not is_video_note:
+                                print(f"[未写入] id={note_id_val_str} 原因=无有效图片")
                                 continue
 
                             if t_type in ('xhs_user_notes', 'xhs_home'):
@@ -275,12 +332,13 @@ async def main():
                                     continue
 
                             await feishu_for_task.add_note(note_details)
+                            print(f"[写入成功] sink={sink_key} id={note_id_val_str}")
                             existing_note_ids.add(note_id_val_str)
                             existing_note_ids_normalized.add(note_id_val_str.lower())
                             successful_note_ids.append(note_id_val_str)
                             await asyncio.sleep(random.randint(5, 10))
                         except Exception as e:
-                            print(f"处理笔记 {note_info.get('note_id')} 时发生严重错误: {e}")
+                            print(f"[未写入] id={note_info.get('note_id')} 原因=异常 {e}")
 
                     sent_count = len(successful_note_ids)
                     print(f"--- 用户 {user_url} 处理完毕，本次已发送 {sent_count}/{per_account_limit} 条 ---")

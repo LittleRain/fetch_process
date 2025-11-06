@@ -17,8 +17,8 @@ FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "oyWom5iYRryFnfUbee3SnfS
 # 多维表格的 App Token，在多维表格 URL 中可以找到，例如:
 # https://<your-domain>.feishu.cn/base/<THIS_IS_THE_APP_TOKEN>?table=<table_id>&view=<view_id>
 # FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "GYnKbo7sIaHm5zseN4gc1NM0nzg") #漫展攻略
-# FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "LDSjbNlMdadMlNsuFq6cli4Anlc") #抓取漫展官方情报
-FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "K9orbPg4harHLwsywv5cMvUMn2e") #抓取IP资讯
+FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "LDSjbNlMdadMlNsuFq6cli4Anlc") #抓取漫展官方情报
+# FEISHU_BASE_APP_TOKEN = os.environ.get("FEISHU_BASE_APP_TOKEN", "K9orbPg4harHLwsywv5cMvUMn2e") #抓取IP资讯
 
 
 # ===============================================================================
@@ -34,35 +34,35 @@ XHS_TARGET_URLS = [
     # "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
 
     ## 官方情报
-    # "https://www.xiaohongshu.com/user/profile/66270a52000000001700ecbf",
-    # "https://www.xiaohongshu.com/user/profile/66b026de000000001d033004",
-    # "https://www.xiaohongshu.com/user/profile/64d9e1bb00000000010052c7",
-    # "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77",
-    # "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31"
+    "https://www.xiaohongshu.com/user/profile/66270a52000000001700ecbf",
+    "https://www.xiaohongshu.com/user/profile/66b026de000000001d033004",
+    "https://www.xiaohongshu.com/user/profile/64d9e1bb00000000010052c7",
+    "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77",
+    "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31"
 
     ## IP资讯
     # "https://www.xiaohongshu.com/user/profile/654e6fa50000000002037e2b",
     # "https://www.xiaohongshu.com/user/profile/60724f13000000000101f9ab",
     # "https://www.xiaohongshu.com/user/profile/5d08fee2000000001200d6e5",
-    "https://www.xiaohongshu.com/user/profile/6652c3ff00000000070046f1",
-    "https://www.xiaohongshu.com/user/profile/641c321a0000000014010069"
+    # "https://www.xiaohongshu.com/user/profile/6652c3ff00000000070046f1",
+    # "https://www.xiaohongshu.com/user/profile/641c321a0000000014010069"
     
 ]
 
 # 要爬取的微博主页URL列表，可以配置多个
 WEIBO_TARGET_URLS = [
     ## 官方情报
-    # "https://weibo.com/u/7517194482",
-    # "https://weibo.com/u/3136375497",
-    # "https://weibo.com/u/5638891142",
-    # "https://weibo.com/u/7617585695",
-    # "https://weibo.com/u/2462905490",
-    # "https://weibo.com/u/6537754228"
+    "https://weibo.com/u/7517194482",
+    "https://weibo.com/u/3136375497",
+    "https://weibo.com/u/5638891142",
+    "https://weibo.com/u/7617585695",
+    "https://weibo.com/u/2462905490",
+    "https://weibo.com/u/6537754228"
 
     ## IP资讯
     # "https://weibo.com/u/1886672467",
-    "https://weibo.com/u/1195908387",
-    "https://weibo.com/u/2686948620"
+    # "https://weibo.com/u/1195908387",
+    # "https://weibo.com/u/2686948620"
 ]
 
 # Playwright 会话状态文件路径，用于保存登录状态
@@ -113,14 +113,14 @@ FEISHU_SINKS = {
     "xhs_default": {
         "app_token": FEISHU_BASE_APP_TOKEN,
         # "table_id": "tbloiTbxqmYBdGiz", ##攻略
-        # "table_id": "tbl3fl5oaC1PNMeN", ##官方情报
-        "table_id": "tblCpHS6AQv7RL8y", ##IP资讯
+        "table_id": "tbl3fl5oaC1PNMeN", ##官方情报
+        # "table_id": "tblCpHS6AQv7RL8y", ##IP资讯
         "field_mapping": FEISHU_FIELD_MAPPING_XHS,
     },
     "weibo_default": {
         "app_token": FEISHU_BASE_APP_TOKEN,
-        # "table_id": "tblisrHchFiWYU7f", ##官方情报
-        "table_id": "tblIfMp2AhsXTZlM", ##IP资讯
+        "table_id": "tblisrHchFiWYU7f", ##官方情报
+        # "table_id": "tblIfMp2AhsXTZlM", ##IP资讯
         "field_mapping": FEISHU_FIELD_MAPPING_WB,
     },
     # 示例：微信渠道可以写入到另一张表（如需）
@@ -153,7 +153,7 @@ TASKS = [
         "params": {
             "urls": WEIBO_TARGET_URLS,
             "per_account_limit": 10,
-            "scrolls": 1,
+            "scrolls": 3,
         },
     },
 ]

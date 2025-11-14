@@ -39,4 +39,5 @@ Thumbs.db
 # Project specific
 auth_state.json
 debug_*.html
+debug_screenshot*.png
 *.log

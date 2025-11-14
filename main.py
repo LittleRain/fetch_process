@@ -274,6 +274,7 @@ async def main():
 
                     total_candidates = len(notes) if notes else 0
                     successful_note_ids: list[str] = []
+                    consecutive_expired = 0  # 仅用于小红书任务，追踪连续过期数量
                     for note_info in filtered_notes:
                         if len(successful_note_ids) >= per_account_limit:
                             break
@@ -322,14 +323,27 @@ async def main():
 
                             if t_type in ('xhs_user_notes', 'xhs_home'):
                                 post_time_str = note_details.get("post_time")
-                                if not _is_within_last_days(post_time_str, 30):
+                                is_expired = not _is_within_last_days(post_time_str, 30)
+                                if is_expired:
                                     print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
-                                    continue
                             elif t_type == 'weibo_home':
                                 post_time_str = note_details.get("post_time")
-                                if not _is_within_last_days(post_time_str, 30):
+                                is_expired = not _is_within_last_days(post_time_str, 30)
+                                if is_expired:
                                     print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
-                                    continue
+                            else:
+                                is_expired = False
+
+                            if is_expired:
+                                if t_type in ('xhs_user_notes', 'xhs_home'):
+                                    consecutive_expired += 1
+                                    if consecutive_expired >= 4:
+                                        print(f"[终止账号] {user_url} 连续4条内容均已过期，结束该账号抓取。")
+                                        break
+                                continue
+                            else:
+                                if t_type in ('xhs_user_notes', 'xhs_home') and consecutive_expired:
+                                    consecutive_expired = 0
 
                             await feishu_for_task.add_note(note_details)
                             print(f"[写入成功] sink={sink_key} id={note_id_val_str}")

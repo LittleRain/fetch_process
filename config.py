@@ -38,7 +38,52 @@ XHS_TARGET_URLS = [
     "https://www.xiaohongshu.com/user/profile/66b026de000000001d033004",
     "https://www.xiaohongshu.com/user/profile/64d9e1bb00000000010052c7",
     "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77",
-    "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31"
+    "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31",
+    "https://www.xiaohongshu.com/user/profile/61e15c43000000001000a13b",
+    "https://www.xiaohongshu.com/user/profile/5c412ace000000000702449a",
+    "https://www.xiaohongshu.com/user/profile/657a77fe000000001c01ad19",
+    "https://www.xiaohongshu.com/user/profile/630b1226000000001501c72e",
+    "https://www.xiaohongshu.com/user/profile/65030082000000000200e3c6",
+    "https://www.xiaohongshu.com/user/profile/625920720000000010006da0",
+    "https://www.xiaohongshu.com/user/profile/66cfc859000000000d02709d",
+    "https://www.xiaohongshu.com/user/profile/6323ed23000000002303fff0",
+    "https://www.xiaohongshu.com/user/profile/607510c80000000001000cc6",
+    "https://www.xiaohongshu.com/user/profile/6004567d00000000010079e4",
+    "https://www.xiaohongshu.com/user/profile/6896469a0000000028036b9e",
+    "https://www.xiaohongshu.com/user/profile/67dae5b4000000000d00a436",
+    "https://www.xiaohongshu.com/user/profile/61ed208f00000000100047b3",
+    "https://www.xiaohongshu.com/user/profile/649bc55f000000001f007928",
+    "https://www.xiaohongshu.com/user/profile/625b9e6a00000000100068a0",
+    "https://www.xiaohongshu.com/user/profile/58e9fd766a6a6925090cd8c7",
+    "https://www.xiaohongshu.com/user/profile/6257ed340000000021028330",
+    "https://www.xiaohongshu.com/user/profile/62f6211f000000001e01faa7",
+    "https://www.xiaohongshu.com/user/profile/63f365180000000014011eb7",
+    "https://www.xiaohongshu.com/user/profile/613f08ee00000000020266c5",
+    "https://www.xiaohongshu.com/user/profile/620dcfbe00000000100096fb",
+    "https://www.xiaohongshu.com/user/profile/5e7253e5000000000100139f",
+    "https://www.xiaohongshu.com/user/profile/682d888a000000000d00b0a8",
+    "https://www.xiaohongshu.com/user/profile/65ab964a000000000d03c4c0",
+    "https://www.xiaohongshu.com/user/profile/64bb81aa000000001403e07b",
+    "https://www.xiaohongshu.com/user/profile/60eff850000000000100188b",
+    "https://www.xiaohongshu.com/user/profile/6516b7e1000000000200e24d",
+    "https://www.xiaohongshu.com/user/profile/58e9fd766a6a6925090cd8c7",
+    "https://www.xiaohongshu.com/user/profile/620dcfbe00000000100096fb",
+    "https://www.xiaohongshu.com/user/profile/6649cfd1000000000303048f",
+    "https://www.xiaohongshu.com/user/profile/66175e9a0000000007007eea",
+    "https://www.xiaohongshu.com/user/profile/6031d1950000000001009e65",
+    "https://www.xiaohongshu.com/user/profile/67f7537b000000000e01f95d",
+    "https://www.xiaohongshu.com/user/profile/6693aadb000000000f0350f7",
+    "https://www.xiaohongshu.com/user/profile/6031d1950000000001009e65",
+    "https://www.xiaohongshu.com/user/profile/6613a6b5000000000b0303a3",
+    "https://www.xiaohongshu.com/user/profile/66a5ba4e000000001d03024b",
+    "https://www.xiaohongshu.com/user/profile/600cdd33000000000101e272",
+    "https://www.xiaohongshu.com/user/profile/652f958c000000000200f263",
+    "https://www.xiaohongshu.com/user/profile/67b49ba8000000000a03c347",
+    "https://www.xiaohongshu.com/user/profile/5e7253e5000000000100139f",
+    "https://www.xiaohongshu.com/user/profile/68886c95000000001e03aba0",
+    "https://www.xiaohongshu.com/user/profile/65e6139a00000000050081fc",
+    "https://www.xiaohongshu.com/user/profile/5f427fab000000000100af58",
+    "https://www.xiaohongshu.com/user/profile/600e98f7000000000101c47f"
 
     ## IP资讯
     # "https://www.xiaohongshu.com/user/profile/654e6fa50000000002037e2b",
@@ -53,11 +98,34 @@ XHS_TARGET_URLS = [
 WEIBO_TARGET_URLS = [
     ## 官方情报
     "https://weibo.com/u/7517194482",
-    "https://weibo.com/u/3136375497",
+    "https://weibo.com/3136375497",
     "https://weibo.com/u/5638891142",
     "https://weibo.com/u/7617585695",
     "https://weibo.com/u/2462905490",
-    "https://weibo.com/u/6537754228"
+    "https://weibo.com/u/6537754228",
+    "https://weibo.com/5889398001",
+    "https://weibo.com/2073298963",
+    "https://weibo.com/2786659525",
+    "https://weibo.com/2531071125",
+    "https://weibo.com/7317743892",
+    "https://weibo.com/u/3832084542",
+    "https://weibo.com/5873857966",
+    "https://weibo.com/u/7617585695",
+    "https://weibo.com/u/5361306361",
+    "https://weibo.com/2073298963",
+    "https://weibo.com/u/7960412164",
+    "https://weibo.com/u/6411589951",
+    "https://weibo.com/7886945717",
+    "https://weibo.com/u/7617585695",
+    "https://weibo.com/3832084542",
+    "https://weibo.com/u/6188204640",
+    "https://weibo.com/u/1745046144",
+    "https://weibo.com/3949708968",
+    "https://weibo.com/3832084542",
+    "https://weibo.com/2073298963",
+    "https://weibo.com/u/7866313834",
+    "https://weibo.com/5889398001",
+    "https://weibo.com/u/3218573045"
 
     ## IP资讯
     # "https://weibo.com/u/1886672467",
@@ -78,7 +146,7 @@ XHS_HEADLESS = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", 
 # 请确保这里的键（key）与你在飞书表格中创建的列名（字段名）完全一致
 # ===============================================================================
 FEISHU_FIELD_MAPPING_XHS = {
-    "note_id": "笔记ID",          # 笔记ID (单行文本)
+    "note_id": "内容ID",          # 笔记ID (单行文本)
     "content": "描述",        # 笔记内容 (多行文本)
     "images": "图片数组",             # 笔记图片 (附件)
     "post_time": "发布时间",      # 发布时间 (日期)

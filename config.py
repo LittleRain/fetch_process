@@ -102,7 +102,6 @@ match TASK_TYPE:
             "https://www.xiaohongshu.com/user/profile/6788e3b1000000000803f229?xsec_token=AB0IrTwPqqha94FWm93ixLXB2jKL2BoOnxnUJTjj8rNeg=&xsec_source=pc_search"
         ]
         curWbTargets = [
-            # "https://weibo.com/u/7517194482",
             # "https://weibo.com/3136375497",
             # "https://weibo.com/u/5638891142",
             # "https://weibo.com/u/7617585695",

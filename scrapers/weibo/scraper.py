@@ -643,8 +643,48 @@ class WeiboHomeScraper:
                 image_candidates = []
             is_retweet = False
             try:
-                retweet_locator = detail_page.locator('[class*="Feed_retweet"]')
-                is_retweet = await retweet_locator.count() > 0
+                is_retweet = await detail_page.evaluate(
+                    """(rootSelectors) => {
+                        const matches = (node) => {
+                            if (!node) return false;
+                            let classText = '';
+                            if (typeof node.className === 'string') {
+                                classText = node.className;
+                            } else if (node.getAttribute) {
+                                classText = node.getAttribute('class') || '';
+                            }
+                            return typeof classText === 'string' && classText.toLowerCase().includes('retweet');
+                        };
+
+                        const scopedSearch = (root) => {
+                            if (!root) return false;
+                            if (matches(root)) return true;
+                            const nodes = root.querySelectorAll('[class]');
+                            for (const el of nodes) {
+                                if (matches(el)) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
+
+                        for (const sel of rootSelectors) {
+                            const candidate = document.querySelector(sel);
+                            if (candidate && scopedSearch(candidate)) {
+                                return true;
+                            }
+                        }
+
+                        return scopedSearch(document.body || document.documentElement);
+                    }""",
+                    [
+                        "article",
+                        "div[class*='Detail']",
+                        "div[class*='detail']",
+                        "div[class*='Fullfeed']",
+                        "section[class*='Detail']",
+                    ],
+                )
             except Exception:
                 is_retweet = False
 

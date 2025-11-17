@@ -337,8 +337,8 @@ async def main():
                             if is_expired:
                                 if t_type in ('xhs_user_notes', 'xhs_home'):
                                     consecutive_expired += 1
-                                    if consecutive_expired >= 4:
-                                        print(f"[终止账号] {user_url} 连续4条内容均已过期，结束该账号抓取。")
+                                    if consecutive_expired >= 3:
+                                        print(f"[终止账号] {user_url} 连续3条内容均已过期，结束该账号抓取。")
                                         break
                                 continue
                             else:

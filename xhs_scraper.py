@@ -109,11 +109,27 @@ class XhsScraper:
             print("已保存截图 `debug_screenshot.png` 以供分析。")
             return []
 
+        card_anchor_selector = (
+            f"{feeds_container_selector} section.note-item a.cover, "
+            f"{feeds_container_selector} a[href*='/explore/']"
+        )
+
         # 模拟向下滚动以加载更多笔记
         for i in range(max(0, scrolls)):
             print(f"正在进行第 {i+1} 次向下滚动...")
+            try:
+                prev_count = await self.page.locator(card_anchor_selector).count()
+            except Exception:
+                prev_count = 0
             await self.page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-            await self.page.wait_for_timeout(random.randint(2500, 4000))
+            try:
+                await self.page.wait_for_function(
+                    "({selector, prev}) => document.querySelectorAll(selector).length > prev",
+                    {"selector": card_anchor_selector, "prev": prev_count},
+                    timeout=2000,
+                )
+            except Exception:
+                await self.page.wait_for_timeout(random.randint(800, 1200))
 
         # 确保至少有一个卡片出现
         try:
@@ -135,9 +151,7 @@ class XhsScraper:
         notes_locator = None
         try:
             # 基础 anchors：主页中指向笔记详情的链接（同时覆盖 note-item 下的 cover 链接）
-            anchors_all = self.page.locator(
-                f"{feeds_container_selector} section.note-item a.cover, {feeds_container_selector} a[href*='/explore/']"
-            )
+            anchors_all = self.page.locator(card_anchor_selector)
             count_all = await anchors_all.count()
             print(f"候选锚点（含 '/explore/'）数量: {count_all}")
 

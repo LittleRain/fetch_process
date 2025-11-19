@@ -17,23 +17,33 @@ class XhsScraper:
         self.context = context
         self.page: Optional[Page] = None
 
-    async def init_page(self):
-        """初始化一个新的页面并进行基本设置"""
-        self.page = await self.context.new_page()
+    async def _create_prepared_page(self) -> Page:
+        page = await self.context.new_page()
         # 降低被检测的风险
-        await self.page.add_init_script("""
+        await page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """)
+        return page
 
-    async def _goto_with_retry(self, url: str, *, wait_until: str = "domcontentloaded", retries: int = 3):
+    async def create_prepared_page(self) -> Page:
+        """创建一个带有最小防检测脚本的新页面"""
+        return await self._create_prepared_page()
+
+    async def init_page(self):
+        """初始化一个新的页面并进行基本设置"""
+        self.page = await self._create_prepared_page()
+
+    async def _goto_with_retry(self, url: str, *, wait_until: str = "domcontentloaded", retries: int = 3, page: Optional[Page] = None):
         """对 goto 进行重试封装，处理小红书页面偶发的导航抢占。"""
-        if not self.page:
+        target_page = page
+        if not target_page:
             await self.init_page()
+            target_page = self.page
 
         last_error: Optional[Exception] = None
         for attempt in range(1, max(1, retries) + 1):
             try:
-                await self.page.goto(url, wait_until=wait_until)
+                await target_page.goto(url, wait_until=wait_until)
                 return
             except (PlaywrightTimeoutError, PlaywrightError) as exc:
                 msg = str(exc) if exc else ""
@@ -42,10 +52,10 @@ class XhsScraper:
                 if attempt < retries and (interrupt or timed_out):
                     print(f"导航到 {url} 未完成，原因: {msg or exc.__class__.__name__}。第 {attempt} 次重试...")
                     try:
-                        await self.page.wait_for_load_state("load")
+                        await target_page.wait_for_load_state("load")
                     except Exception:
                         pass
-                    await self.page.wait_for_timeout(800)
+                    await target_page.wait_for_timeout(800)
                     last_error = exc
                     continue
                 last_error = exc
@@ -361,21 +371,28 @@ class XhsScraper:
         return scraped_notes
         
 
-    async def scrape_note_details(self, note_info: Dict) -> Dict:
+    async def scrape_note_details(self, note_info: Dict, page: Optional[Page] = None) -> Dict:
         """
         进入笔记详情页，爬取详细信息。
         :param note_info: 包含笔记 ID 和 URL 的字典
+        :param page: 可选，自定义页面以避免复用主页
         :return: 包含笔记所有详细信息的字典
         """
-        if not self.page:
-            await self.init_page()
+        pg: Optional[Page] = page
+        owns_page = pg is None
+        if pg is None:
+            if not self.page:
+                await self.init_page()
+            pg = self.page
+
+        if not pg:
+            raise RuntimeError("无法获取有效的 Playwright 页面用于抓取详情。")
 
         print(f"正在爬取笔记详情: {note_info['url']}")
 
-        pg: Union[Page, Frame] = self.page
         detail_page_to_close: Optional[Page] = None
         try:
-            restore_url = pg.url
+            restore_url = pg.url if owns_page else None
         except Exception:
             restore_url = None
 
@@ -413,8 +430,7 @@ class XhsScraper:
             return None
 
         try:
-            await self._goto_with_retry(target_url)
-            pg = self.page
+            await self._goto_with_retry(target_url, page=pg)
             try:
                 await pg.wait_for_selector(
                     "article, .slider-container, img.note-slider-img, #detail-desc, .note-desc, .note-content, .desc",
@@ -927,7 +943,7 @@ class XhsScraper:
 
                 if fb_url:
                     try:
-                        extra_note_page = await self.context.new_page()
+                        extra_note_page = await self.create_prepared_page()
                         detail_page_to_close = extra_note_page
                         await extra_note_page.goto(fb_url, wait_until="domcontentloaded")
                         try:

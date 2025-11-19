@@ -93,7 +93,7 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
 
 def _is_within_last_month(post_time: str) -> bool:
     """保留兼容函数，判断是否在最近30天内。"""
-    return _is_within_last_days(post_time, 30)
+    return _is_within_last_days(post_time, 14)
 
 async def main():
     """主函数，编排整个爬取和写入流程"""
@@ -209,9 +209,10 @@ async def main():
                     print(f"\n--- 开始处理用户: {user_url} ---")
                     try:
                         if t_type in ('xhs_user_notes', 'xhs_home'):
+                            candidate_limit = max(per_account_limit, min(40, per_account_limit * 2))
                             notes = await scraper.scrape_user_notes(
                                 user_url,
-                                max_notes=max(40, per_account_limit * 4),
+                                max_notes=candidate_limit,
                                 scrolls=scrolls,
                             )
                         elif t_type == 'wechat_articles':
@@ -275,84 +276,148 @@ async def main():
                     total_candidates = len(notes) if notes else 0
                     successful_note_ids: list[str] = []
                     consecutive_expired = 0  # 仅用于小红书任务，追踪连续过期数量
-                    for note_info in filtered_notes:
-                        if len(successful_note_ids) >= per_account_limit:
-                            break
-                        try:
-                            note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
-                            note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
-                            if not note_id_val_str:
-                                continue
-                            if note_info.get('is_video') and t_type not in ('weibo_home',):
-                                continue
-                            print(f"[需要抓详情] id={note_id_val_str}")
+                    is_xhs_task = t_type in ('xhs_user_notes', 'xhs_home')
 
-                            if t_type == 'weibo_home':
-                                summary_post_time = note_info.get('post_time')
-                                if summary_post_time and not _is_within_last_days(summary_post_time, 30):
-                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
-                                    continue
+                    async def attempt_write(note_info_inner, note_details_inner, note_id_val_str_inner):
+                        nonlocal consecutive_expired
+                        if not note_details_inner:
+                            print(f"[未写入] id={note_id_val_str_inner} 原因=详情抓取失败")
+                            return False, False
+                        ctt = note_details_inner.get("content")
+                        if not ctt or not str(ctt).strip():
+                            print(f"[未写入] id={note_id_val_str_inner} 原因=正文为空")
+                            return False, False
+                        imgs = note_details_inner.get("images") or []
+                        valid_imgs = []
+                        if isinstance(imgs, list):
+                            valid_imgs = [u for u in imgs if isinstance(u, str) and u.strip() and not u.startswith("data:")]
+                        elif isinstance(imgs, str) and imgs.strip():
+                            valid_imgs = [imgs]
+                        is_video_note = note_details_inner.get("is_video") or note_info_inner.get('is_video')
+                        if not valid_imgs and not is_video_note:
+                            print(f"[未写入] id={note_id_val_str_inner} 原因=无有效图片")
+                            return False, False
 
-                            # 爬取笔记详情
-                            if t_type in ('xhs_user_notes', 'xhs_home'):
-                                note_details = await scraper.scrape_note_details(note_info)
-                            elif t_type == 'wechat_articles':
-                                note_details = await wechat_scraper.scrape_article_details(note_info)
-                            else:
-                                note_details = await weibo_scraper.scrape_post_details(note_info)
-                            if not note_details:
-                                print(f"[未写入] id={note_id_val_str} 原因=详情抓取失败")
-                                continue
-
-                            # 如果内容为空，跳过写入
-                            ctt = note_details.get("content")
-                            if not ctt or not str(ctt).strip():
-                                print(f"[未写入] id={note_id_val_str} 原因=正文为空")
-                                continue
-                            # 如果图片数组为空，跳过写入
-                            imgs = note_details.get("images") or []
-                            valid_imgs = []
-                            if isinstance(imgs, list):
-                                valid_imgs = [u for u in imgs if isinstance(u, str) and u.strip() and not u.startswith("data:")]
-                            elif isinstance(imgs, str) and imgs.strip():
-                                valid_imgs = [imgs]
-                            is_video_note = note_details.get("is_video") or note_info.get('is_video')
-                            if not valid_imgs and not is_video_note:
-                                print(f"[未写入] id={note_id_val_str} 原因=无有效图片")
-                                continue
-
-                            if t_type in ('xhs_user_notes', 'xhs_home'):
-                                post_time_str = note_details.get("post_time")
-                                is_expired = not _is_within_last_days(post_time_str, 30)
-                                if is_expired:
-                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
-                            elif t_type == 'weibo_home':
-                                post_time_str = note_details.get("post_time")
-                                is_expired = not _is_within_last_days(post_time_str, 30)
-                                if is_expired:
-                                    print(f"[过期] 跳过 id={note_id_val_str} post_time={post_time_str}")
-                            else:
-                                is_expired = False
-
+                        if is_xhs_task:
+                            post_time_str = note_details_inner.get("post_time")
+                            is_expired = not _is_within_last_days(post_time_str, 14)
                             if is_expired:
-                                if t_type in ('xhs_user_notes', 'xhs_home'):
-                                    consecutive_expired += 1
-                                    if consecutive_expired >= 3:
-                                        print(f"[终止账号] {user_url} 连续3条内容均已过期，结束该账号抓取。")
-                                        break
-                                continue
-                            else:
-                                if t_type in ('xhs_user_notes', 'xhs_home') and consecutive_expired:
-                                    consecutive_expired = 0
+                                print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
+                        elif t_type == 'weibo_home':
+                            post_time_str = note_details_inner.get("post_time")
+                            is_expired = not _is_within_last_days(post_time_str, 14)
+                            if is_expired:
+                                print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
+                        else:
+                            is_expired = False
 
-                            await feishu_for_task.add_note(note_details)
-                            print(f"[写入成功] sink={sink_key} id={note_id_val_str}")
-                            existing_note_ids.add(note_id_val_str)
-                            existing_note_ids_normalized.add(note_id_val_str.lower())
-                            successful_note_ids.append(note_id_val_str)
-                            await asyncio.sleep(random.randint(5, 10))
-                        except Exception as e:
-                            print(f"[未写入] id={note_info.get('note_id')} 原因=异常 {e}")
+                        if is_expired:
+                            if is_xhs_task:
+                                consecutive_expired += 1
+                                if consecutive_expired >= 3:
+                                    print(f"[终止账号] {user_url} 连续3条内容均已过期，结束该账号抓取。")
+                                    return False, True
+                            return False, False
+                        else:
+                            if is_xhs_task and consecutive_expired:
+                                consecutive_expired = 0
+
+                        await feishu_for_task.add_note(note_details_inner)
+                        print(f"[写入成功] sink={sink_key} id={note_id_val_str_inner}")
+                        existing_note_ids.add(note_id_val_str_inner)
+                        existing_note_ids_normalized.add(note_id_val_str_inner.lower())
+                        successful_note_ids.append(note_id_val_str_inner)
+                        await asyncio.sleep(random.randint(5, 10))
+                        return True, False
+
+                    if is_xhs_task:
+                        detail_concurrency = int(os.environ.get("XHS_DETAIL_CONCURRENCY", "2") or "2")
+                        if detail_concurrency < 1:
+                            detail_concurrency = 1
+                        detail_concurrency = min(detail_concurrency, per_account_limit)
+                        pending_tasks = []
+                        note_index = 0
+                        stop_due_to_expired = False
+
+                        async def run_detail_fetch(note_payload):
+                            detail_page = None
+                            try:
+                                detail_page = await scraper.create_prepared_page()
+                                return await scraper.scrape_note_details(note_payload, page=detail_page)
+                            finally:
+                                if detail_page:
+                                    try:
+                                        await detail_page.close()
+                                    except Exception:
+                                        pass
+
+                        while (note_index < len(filtered_notes) or pending_tasks) and len(successful_note_ids) < per_account_limit:
+                            while (
+                                note_index < len(filtered_notes)
+                                and len(pending_tasks) < detail_concurrency
+                                and len(successful_note_ids) + len(pending_tasks) < per_account_limit
+                            ):
+                                note_info = filtered_notes[note_index]
+                                note_index += 1
+                                note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
+                                note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
+                                if not note_id_val_str:
+                                    continue
+                                print(f"[需要抓详情] id={note_id_val_str}")
+                                pending_tasks.append(
+                                    (note_info, note_id_val_str, asyncio.create_task(run_detail_fetch(note_info)))
+                                )
+
+                            if not pending_tasks:
+                                break
+
+                            note_info_cur, note_id_str_cur, task = pending_tasks.pop(0)
+                            note_details = None
+                            try:
+                                note_details = await task
+                            except Exception as e:
+                                print(f"[未写入] id={note_id_str_cur} 原因=详情抓取异常 {e}")
+                            _, should_stop = await attempt_write(note_info_cur, note_details, note_id_str_cur)
+                            if should_stop:
+                                stop_due_to_expired = True
+                                break
+
+                        # 结束循环后取消剩余任务，避免页面泄漏
+                        for _, __, task in pending_tasks:
+                            task.cancel()
+                            try:
+                                await task
+                            except Exception:
+                                pass
+                        if stop_due_to_expired:
+                            # 清理后直接结束本账号
+                            pass
+                    else:
+                        for note_info in filtered_notes:
+                            if len(successful_note_ids) >= per_account_limit:
+                                break
+                            try:
+                                note_id_val = note_info.get(note_id_key) or note_info.get('note_id')
+                                note_id_val_str = str(note_id_val).strip() if note_id_val is not None else ""
+                                if not note_id_val_str:
+                                    continue
+                                print(f"[需要抓详情] id={note_id_val_str}")
+
+                                if t_type == 'weibo_home':
+                                    summary_post_time = note_info.get('post_time')
+                                    if summary_post_time and not _is_within_last_days(summary_post_time, 14):
+                                        print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
+                                        continue
+
+                                if t_type == 'wechat_articles':
+                                    note_details = await wechat_scraper.scrape_article_details(note_info)
+                                else:
+                                    note_details = await weibo_scraper.scrape_post_details(note_info)
+                                _, should_stop = await attempt_write(note_info, note_details, note_id_val_str)
+                                if should_stop:
+                                    break
+                            except Exception as e:
+                                print(f"[未写入] id={note_info.get('note_id')} 原因=异常 {e}")
 
                     sent_count = len(successful_note_ids)
                     print(f"--- 用户 {user_url} 处理完毕，本次已发送 {sent_count}/{per_account_limit} 条 ---")

@@ -66,8 +66,20 @@ class XhsScraper:
 
     async def close(self):
         """关闭页面"""
-        if self.page and not self.page.is_closed():
-            await self.page.close()
+        await self.reset_home_page()
+
+    async def reset_home_page(self):
+        """关闭当前主页页并清理引用，防止残留标签页"""
+        if self.page:
+            try:
+                if not self.page.is_closed():
+                    await self.page.close()
+            except Exception:
+                pass
+            finally:
+                self.page = None
+        else:
+            self.page = None
 
     async def check_login_status(self) -> bool:
         """
@@ -89,8 +101,30 @@ class XhsScraper:
             print("登录状态正常。")
             return True
         except Exception:
-            print("登录状态失效或未登录。")
-            return False
+            pass
+
+        # 无法通过 DOM 判断时，检查 cookie/localStorage 作为兜底，避免无头模式误判
+        try:
+            cookies = await self.context.cookies()
+            cookie_names = {c.get("name") for c in cookies}
+            has_core = any(name in cookie_names for name in ("web_session", "a1", "webId"))
+            if has_core:
+                print("通过 Cookie 检测登录状态正常。")
+                return True
+        except Exception:
+            pass
+        try:
+            has_token_in_storage = await self.page.evaluate(
+                "() => !!(localStorage.getItem('user-id') || localStorage.getItem('web_session'))"
+            )
+            if has_token_in_storage:
+                print("通过 localStorage 检测登录状态正常。")
+                return True
+        except Exception:
+            pass
+
+        print("登录状态失效或未登录。")
+        return False
 
     async def scrape_user_notes(self, user_url: str, max_notes: int = 10, scrolls: int = 1) -> List[Dict]:
         """
@@ -390,6 +424,37 @@ class XhsScraper:
 
         print(f"正在爬取笔记详情: {note_info['url']}")
 
+        content_wait_selector = "#detail-desc, .desc, .note-desc, .note-content, article"
+        image_wait_selector = (
+            "div.swiper-slide img.preview-image, img.preview-image, article img, "
+            "img[src*='xiaohongshu.com'], img[src*='xhsimg'], img[src*='sns-img']"
+        )
+
+        async def ensure_detail_ready(page: Union[Page, Frame]):
+            try:
+                await page.wait_for_selector(content_wait_selector, timeout=6000)
+            except Exception:
+                pass
+            image_ready = False
+            try:
+                await page.wait_for_selector(image_wait_selector, timeout=4000)
+                image_ready = True
+            except Exception:
+                image_ready = False
+
+            if not image_ready:
+                for _ in range(3):
+                    try:
+                        await page.evaluate("window.scrollBy(0, Math.max(window.innerHeight, 400))")
+                    except Exception:
+                        break
+                    await page.wait_for_timeout(400)
+                    try:
+                        if await page.locator(image_wait_selector).count() > 0:
+                            break
+                    except Exception:
+                        break
+
         detail_page_to_close: Optional[Page] = None
         try:
             restore_url = pg.url if owns_page else None
@@ -431,24 +496,7 @@ class XhsScraper:
 
         try:
             await self._goto_with_retry(target_url, page=pg)
-            try:
-                await pg.wait_for_selector(
-                    "article, .slider-container, img.note-slider-img, #detail-desc, .note-desc, .note-content, .desc",
-                    timeout=12000,
-                )
-            except Exception:
-                pass
-            try:
-                await pg.wait_for_load_state("networkidle")
-            except Exception:
-                pass
-            await pg.wait_for_timeout(random.randint(2000, 3500))
-            try:
-                for _ in range(4):
-                    await pg.evaluate("window.scrollBy(0, Math.max(300, window.innerHeight))")
-                    await pg.wait_for_timeout(700)
-            except Exception:
-                pass
+            await ensure_detail_ready(pg)
         except Exception as nav_err:
             print(f"导航至详情页失败: {nav_err}")
             return None
@@ -946,16 +994,7 @@ class XhsScraper:
                         extra_note_page = await self.create_prepared_page()
                         detail_page_to_close = extra_note_page
                         await extra_note_page.goto(fb_url, wait_until="domcontentloaded")
-                        try:
-                            await extra_note_page.wait_for_load_state("networkidle")
-                        except Exception:
-                            pass
-                        try:
-                            for _ in range(4):
-                                await extra_note_page.evaluate("window.scrollBy(0, Math.max(300, window.innerHeight))")
-                                await extra_note_page.wait_for_timeout(700)
-                        except Exception:
-                            pass
+                        await ensure_detail_ready(extra_note_page)
 
                         # 切换解析上下文为新开的详情页
                         pg = extra_note_page

@@ -3,6 +3,7 @@ import os
 import random
 import re
 from datetime import datetime, timedelta
+from typing import List, Dict
 from playwright.async_api import async_playwright, APIRequestContext
 
 import config
@@ -154,11 +155,21 @@ async def main():
         }
         if has_xhs_tasks:
             context_kwargs["storage_state"] = config.XHS_AUTH_STATE_PATH
+        xhs_context_kwargs = dict(context_kwargs)
         context = await browser.new_context(**context_kwargs)
         
         scraper = XhsScraper(context)
         wechat_scraper = WeChatArticleScraper(context)
         weibo_scraper = WeiboHomeScraper(context)
+
+        async def fetch_xhs_user_notes(user_url: str, max_notes: int, scrolls: int) -> List[Dict]:
+            temp_context = await browser.new_context(**xhs_context_kwargs)
+            temp_scraper = XhsScraper(temp_context)
+            try:
+                return await temp_scraper.scrape_user_notes(user_url, max_notes=max_notes, scrolls=scrolls)
+            finally:
+                await temp_scraper.close()
+                await temp_context.close()
 
         try:
             summary_counts = {}
@@ -210,7 +221,7 @@ async def main():
                     try:
                         if t_type in ('xhs_user_notes', 'xhs_home'):
                             candidate_limit = max(per_account_limit, min(40, per_account_limit * 2))
-                            notes = await scraper.scrape_user_notes(
+                            notes = await fetch_xhs_user_notes(
                                 user_url,
                                 max_notes=candidate_limit,
                                 scrolls=scrolls,
@@ -231,6 +242,8 @@ async def main():
                     except Exception as e:
                         print(f"爬取用户 {user_url} 列表时出错: {e}")
                         summary_counts[user_url] = 0
+                        if t_type in xhs_task_types:
+                            await scraper.reset_home_page()
                         continue
 
                     # 批量查询已存在的 note_id，避免逐条请求
@@ -335,21 +348,22 @@ async def main():
                         if detail_concurrency < 1:
                             detail_concurrency = 1
                         detail_concurrency = min(detail_concurrency, per_account_limit)
+                        detail_page_pool: list = []
+                        page_queue: asyncio.Queue = asyncio.Queue()
+                        for _ in range(detail_concurrency):
+                            page = await scraper.create_prepared_page()
+                            detail_page_pool.append(page)
+                            await page_queue.put(page)
                         pending_tasks = []
                         note_index = 0
                         stop_due_to_expired = False
 
                         async def run_detail_fetch(note_payload):
-                            detail_page = None
+                            detail_page = await page_queue.get()
                             try:
-                                detail_page = await scraper.create_prepared_page()
                                 return await scraper.scrape_note_details(note_payload, page=detail_page)
                             finally:
-                                if detail_page:
-                                    try:
-                                        await detail_page.close()
-                                    except Exception:
-                                        pass
+                                await page_queue.put(detail_page)
 
                         while (note_index < len(filtered_notes) or pending_tasks) and len(successful_note_ids) < per_account_limit:
                             while (
@@ -375,6 +389,9 @@ async def main():
                             note_details = None
                             try:
                                 note_details = await task
+                            except asyncio.CancelledError:
+                                print(f"[取消] id={note_id_str_cur} 详情任务已取消")
+                                continue
                             except Exception as e:
                                 print(f"[未写入] id={note_id_str_cur} 原因=详情抓取异常 {e}")
                             _, should_stop = await attempt_write(note_info_cur, note_details, note_id_str_cur)
@@ -387,6 +404,14 @@ async def main():
                             task.cancel()
                             try:
                                 await task
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception:
+                                pass
+                        for page in detail_page_pool:
+                            try:
+                                if not page.is_closed():
+                                    await page.close()
                             except Exception:
                                 pass
                         if stop_due_to_expired:

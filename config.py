@@ -181,7 +181,8 @@ XHS_AUTH_STATE_PATH = "auth_state.json"
 
 # 是否使用无头模式运行浏览器（默认否）。
 # 可通过环境变量 XHS_HEADLESS=1/true/yes 开启无头模式（如在服务器/CI上）。
-XHS_HEADLESS = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", "yes")
+# XHS_HEADLESS = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", "yes")
+XHS_HEADLESS = True
 
 
 # ===============================================================================

@@ -94,7 +94,7 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
 
 def _is_within_last_month(post_time: str) -> bool:
     """保留兼容函数，判断是否在最近30天内。"""
-    return _is_within_last_days(post_time, 14)
+    return _is_within_last_days(post_time, 10)
 
 async def main():
     """主函数，编排整个爬取和写入流程"""
@@ -133,10 +133,16 @@ async def main():
             'weibo_home',
         }
         has_xhs_tasks = any(task.get('type') in xhs_task_types for task in tasks)
+        has_weibo_tasks = any(task.get('type') == 'weibo_home' for task in tasks)
 
         if has_xhs_tasks and not os.path.exists(config.XHS_AUTH_STATE_PATH):
             print(f"错误：未找到会话文件 {config.XHS_AUTH_STATE_PATH}。")
             print("请先运行 python login_helper.py 进行手动登录以生成会话文件。")
+            await request_context.dispose()
+            return
+        if has_weibo_tasks and not os.path.exists(config.WEIBO_AUTH_STATE_PATH):
+            print(f"错误：未找到微博会话文件 {config.WEIBO_AUTH_STATE_PATH}。")
+            print("请先运行 python weibo_login_helper.py 完成登录并保存状态。")
             await request_context.dispose()
             return
 
@@ -145,7 +151,7 @@ async def main():
             headless=config.XHS_HEADLESS,
             args=["--disable-blink-features=AutomationControlled", "--start-maximized"]
         )
-        context_kwargs = {
+        base_context_kwargs = {
             "no_viewport": True,
             "user_agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -153,14 +159,29 @@ async def main():
                 "Chrome/126.0.0.0 Safari/537.36"
             ),
         }
+        context_kwargs = dict(base_context_kwargs)
         if has_xhs_tasks:
             context_kwargs["storage_state"] = config.XHS_AUTH_STATE_PATH
         xhs_context_kwargs = dict(context_kwargs)
+        weibo_context_kwargs = dict(base_context_kwargs)
+        if has_weibo_tasks:
+            weibo_context_kwargs.update(
+                {
+                    "storage_state": config.WEIBO_AUTH_STATE_PATH,
+                    "locale": "zh-CN",
+                    "timezone_id": "Asia/Shanghai",
+                    "extra_http_headers": {
+                        "Accept-Language": "zh-CN,zh;q=0.9",
+                    },
+                }
+            )
+
         context = await browser.new_context(**context_kwargs)
+        weibo_context = await browser.new_context(**weibo_context_kwargs) if has_weibo_tasks else context
         
         scraper = XhsScraper(context)
         wechat_scraper = WeChatArticleScraper(context)
-        weibo_scraper = WeiboHomeScraper(context)
+        weibo_scraper = WeiboHomeScraper(weibo_context)
 
         async def fetch_xhs_user_notes(user_url: str, max_notes: int, scrolls: int) -> List[Dict]:
             temp_context = await browser.new_context(**xhs_context_kwargs)
@@ -313,12 +334,12 @@ async def main():
 
                         if is_xhs_task:
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, 14)
+                            is_expired = not _is_within_last_days(post_time_str, 10)
                             if is_expired:
                                 print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
                         elif t_type == 'weibo_home':
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, 14)
+                            is_expired = not _is_within_last_days(post_time_str, 10)
                             if is_expired:
                                 print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
                         else:
@@ -430,7 +451,7 @@ async def main():
 
                                 if t_type == 'weibo_home':
                                     summary_post_time = note_info.get('post_time')
-                                    if summary_post_time and not _is_within_last_days(summary_post_time, 14):
+                                    if summary_post_time and not _is_within_last_days(summary_post_time, 10):
                                         print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
                                         continue
 
@@ -454,6 +475,11 @@ async def main():
             await scraper.close()
             await wechat_scraper.close()
             await weibo_scraper.close()
+            if has_weibo_tasks and weibo_context:
+                try:
+                    await weibo_context.close()
+                except Exception:
+                    pass
             await browser.close()
             await request_context.dispose()
     

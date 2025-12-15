@@ -1,7 +1,7 @@
 # --*-- coding: utf-8 --*--
 import os
 
-TASK_TYPE = 2 #1:IP资讯; 2:官方情报; 3:漫展攻略
+TASK_TYPE = 1 #1:IP资讯; 2:漫展官方情报; 3:漫展攻略 4:模型上新情报
 match TASK_TYPE:
     case 1:  ##IP资讯
         curFeishuAppToken = "K9orbPg4harHLwsywv5cMvUMn2e"
@@ -24,114 +24,80 @@ match TASK_TYPE:
         curXhsTableId = "tbl3fl5oaC1PNMeN"
         curWbTableId = "tblisrHchFiWYU7f"
         curXhsTargets = [
-            "https://www.xiaohongshu.com/user/profile/66270a52000000001700ecbf",
-            "https://www.xiaohongshu.com/user/profile/66b026de000000001d033004",
-            "https://www.xiaohongshu.com/user/profile/64d9e1bb00000000010052c7",
-            "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77",
-            "https://www.xiaohongshu.com/user/profile/63ed03690000000026004e31",
-            "https://www.xiaohongshu.com/user/profile/61e15c43000000001000a13b",
-            "https://www.xiaohongshu.com/user/profile/5c412ace000000000702449a",
-            "https://www.xiaohongshu.com/user/profile/657a77fe000000001c01ad19",
-            "https://www.xiaohongshu.com/user/profile/630b1226000000001501c72e",
-            "https://www.xiaohongshu.com/user/profile/65030082000000000200e3c6",
-            "https://www.xiaohongshu.com/user/profile/625920720000000010006da0",
-            "https://www.xiaohongshu.com/user/profile/66cfc859000000000d02709d",
-            "https://www.xiaohongshu.com/user/profile/6323ed23000000002303fff0",
-            "https://www.xiaohongshu.com/user/profile/607510c80000000001000cc6",
-            "https://www.xiaohongshu.com/user/profile/6004567d00000000010079e4",
-            "https://www.xiaohongshu.com/user/profile/6896469a0000000028036b9e",
-            "https://www.xiaohongshu.com/user/profile/67dae5b4000000000d00a436",
-            "https://www.xiaohongshu.com/user/profile/61ed208f00000000100047b3",
-            "https://www.xiaohongshu.com/user/profile/649bc55f000000001f007928",
-            "https://www.xiaohongshu.com/user/profile/625b9e6a00000000100068a0",
-            "https://www.xiaohongshu.com/user/profile/58e9fd766a6a6925090cd8c7",
-            "https://www.xiaohongshu.com/user/profile/6257ed340000000021028330",
-            "https://www.xiaohongshu.com/user/profile/62f6211f000000001e01faa7",
-            "https://www.xiaohongshu.com/user/profile/63f365180000000014011eb7",
-            "https://www.xiaohongshu.com/user/profile/613f08ee00000000020266c5",
-            "https://www.xiaohongshu.com/user/profile/620dcfbe00000000100096fb",
-            "https://www.xiaohongshu.com/user/profile/5e7253e5000000000100139f",
+            "https://www.xiaohongshu.com/user/profile/5f39108f0000000001006ed5",
+            "https://www.xiaohongshu.com/user/profile/692549e70000000037007974",
+            "https://www.xiaohongshu.com/user/profile/5c29ffeb000000000701325f",
+            "https://www.xiaohongshu.com/user/profile/5bef681d7f485d000185930a",
             "https://www.xiaohongshu.com/user/profile/682d888a000000000d00b0a8",
-            "https://www.xiaohongshu.com/user/profile/65ab964a000000000d03c4c0",
-            "https://www.xiaohongshu.com/user/profile/64bb81aa000000001403e07b",
-            "https://www.xiaohongshu.com/user/profile/60eff850000000000100188b",
-            "https://www.xiaohongshu.com/user/profile/6516b7e1000000000200e24d",
-            "https://www.xiaohongshu.com/user/profile/58e9fd766a6a6925090cd8c7",
-            "https://www.xiaohongshu.com/user/profile/620dcfbe00000000100096fb",
-            "https://www.xiaohongshu.com/user/profile/6649cfd1000000000303048f",
-            "https://www.xiaohongshu.com/user/profile/66175e9a0000000007007eea",
-            "https://www.xiaohongshu.com/user/profile/6031d1950000000001009e65",
-            "https://www.xiaohongshu.com/user/profile/67f7537b000000000e01f95d",
-            "https://www.xiaohongshu.com/user/profile/6693aadb000000000f0350f7",
-            "https://www.xiaohongshu.com/user/profile/6613a6b5000000000b0303a3",
-            "https://www.xiaohongshu.com/user/profile/66a5ba4e000000001d03024b",
-            "https://www.xiaohongshu.com/user/profile/600cdd33000000000101e272",
-            "https://www.xiaohongshu.com/user/profile/652f958c000000000200f263",
-            "https://www.xiaohongshu.com/user/profile/67b49ba8000000000a03c347",
-            "https://www.xiaohongshu.com/user/profile/5e7253e5000000000100139f",
-            "https://www.xiaohongshu.com/user/profile/68886c95000000001e03aba0",
-            "https://www.xiaohongshu.com/user/profile/65e6139a00000000050081fc",
-            "https://www.xiaohongshu.com/user/profile/5f427fab000000000100af58",
-            "https://www.xiaohongshu.com/user/profile/600e98f7000000000101c47f",
-            "https://www.xiaohongshu.com/user/profile/6031d1950000000001009e65",
-            "https://www.xiaohongshu.com/user/profile/5ec6434700000000010030fe",
-            "https://www.xiaohongshu.com/user/profile/618d4e9b0000000021027817",
-            "https://www.xiaohongshu.com/user/profile/5f496779000000000101eeec",
-            "https://www.xiaohongshu.com/user/profile/5dfa6deb000000000100aeb7",
+            "https://www.xiaohongshu.com/user/profile/610e6b100000000001005f43",
+            "https://www.xiaohongshu.com/user/profile/64c9380a000000000b00916f",
+            "https://www.xiaohongshu.com/user/profile/6475eeb9000000002a034448",
+            "https://www.xiaohongshu.com/user/profile/68247dd5000000000d008a1d",
+            "https://www.xiaohongshu.com/user/profile/5f819473000000000101eab0",
+            "https://www.xiaohongshu.com/user/profile/5c734dd7000000001102286e",
+            "https://www.xiaohongshu.com/user/profile/660b66ee000000000b00f85f",
+            "https://www.xiaohongshu.com/user/profile/692549e70000000037007974",
+            "https://www.xiaohongshu.com/user/profile/5c29ffeb000000000701325f",
+            "https://www.xiaohongshu.com/user/profile/67c7c2c8000000000e01f67f",
+            "https://www.xiaohongshu.com/user/profile/66542ba00000000003030c3f",
+            "https://www.xiaohongshu.com/user/profile/6004567d00000000010079e4",
+            "https://www.xiaohongshu.com/user/profile/665bfa8c0000000003030b42",
+            "https://www.xiaohongshu.com/user/profile/62cfefe5000000000303c004",
+            "https://www.xiaohongshu.com/user/profile/68bdb586000000001900cdc3",
+            "https://www.xiaohongshu.com/user/profile/665812ac000000000d0270d3",
+            "https://www.xiaohongshu.com/user/profile/680cd9b5000000000e011920",
+            "https://www.xiaohongshu.com/user/profile/686cb26400000000070304f7",
+            "https://www.xiaohongshu.com/user/profile/659be6110000000022007918",
+            "https://www.xiaohongshu.com/user/profile/621c6970000000001000d87e",
+            "https://www.xiaohongshu.com/user/profile/666ff951000000000d024f03",
+            "https://www.xiaohongshu.com/user/profile/6285b65f0000000021026650",
+            "https://www.xiaohongshu.com/user/profile/6821ca49000000000a03f5dc",
+            "https://www.xiaohongshu.com/user/profile/5c47208d00000000100367d4",
+            "https://www.xiaohongshu.com/user/profile/6821ca49000000000a03f5dc",
+            "https://www.xiaohongshu.com/user/profile/5c47208d00000000100367d4",
+            "https://www.xiaohongshu.com/user/profile/6744456b00000000010031a3",
+            "https://www.xiaohongshu.com/user/profile/61e15c43000000001000a13b",
+            "https://www.xiaohongshu.com/user/profile/625acec500000000210201fa",
+            "https://www.xiaohongshu.com/user/profile/63f365180000000014011eb7",
+            "https://www.xiaohongshu.com/user/profile/692549e70000000037007974",
+            "https://www.xiaohongshu.com/user/profile/5c4e8a1d0000000011036be5",
+            "https://www.xiaohongshu.com/user/profile/593a3c475e87e72cec242de8",
+            "https://www.xiaohongshu.com/user/profile/6323ed23000000002303fff0",
+            "https://www.xiaohongshu.com/user/profile/5cf827600000000018039ce1",
+            "https://www.xiaohongshu.com/user/profile/5bc4245adb088100011aa4f9",
             "https://www.xiaohongshu.com/user/profile/64ec82a20000000001013032",
-            "https://www.xiaohongshu.com/user/profile/60365ef90000000001008917",
             "https://www.xiaohongshu.com/user/profile/6123af4f00000000010080c2",
-            "https://www.xiaohongshu.com/user/profile/62062f6f0000000010009a28",
-            "https://www.xiaohongshu.com/user/profile/646f43f8000000002b00baa3",
             "https://www.xiaohongshu.com/user/profile/68415151000000001e03865f",
-            "https://www.xiaohongshu.com/user/profile/6761c938000000001801626e",
-            "https://www.xiaohongshu.com/user/profile/5d7bca46000000000101a84d",
             "https://www.xiaohongshu.com/user/profile/6257ed340000000021028330",
-            "https://www.xiaohongshu.com/user/profile/5c8343960000000012000bf5",
             "https://www.xiaohongshu.com/user/profile/648838610000000011000f6e",
             "https://www.xiaohongshu.com/user/profile/65f4052b000000000500dbab",
             "https://www.xiaohongshu.com/user/profile/66bb88d1000000001d032a8d",
-            "https://www.xiaohongshu.com/user/profile/5c9f1e0b0000000010012f72",
-            "https://www.xiaohongshu.com/user/profile/656d220f0000000019012f12",
-            "https://www.xiaohongshu.com/user/profile/62cfefe5000000000303c004",
-            "https://www.xiaohongshu.com/user/profile/687a677c000000001e03f8f7",
-            "https://www.xiaohongshu.com/user/profile/66637ec4000000000700618c",
-            "https://www.xiaohongshu.com/user/profile/5ea159eb000000000100a2f6",
-            "https://www.xiaohongshu.com/user/profile/67fc5bcf000000001b00b25b",
-            "https://www.xiaohongshu.com/user/profile/63f365180000000014011eb7",
-            "https://www.xiaohongshu.com/user/profile/6788e3b1000000000803f229"
+            "https://www.xiaohongshu.com/user/profile/6788e3b1000000000803f229",
+            "https://www.xiaohongshu.com/user/profile/67f7537b000000000e01f95d",
+            "https://www.xiaohongshu.com/user/profile/6693aadb000000000f0350f7",
+            "https://www.xiaohongshu.com/user/profile/6896469a0000000028036b9e",
+            "https://www.xiaohongshu.com/user/profile/649bc55f000000001f007928",
+            "https://www.xiaohongshu.com/user/profile/625920720000000010006da0",
+            "https://www.xiaohongshu.com/user/profile/65030082000000000200e3c6",
+            "https://www.xiaohongshu.com/user/profile/657a77fe000000001c01ad19",
+            "https://www.xiaohongshu.com/user/profile/5c412ace000000000702449a",
+            "https://www.xiaohongshu.com/user/profile/622b98f1000000001000bb77"
         ]
         curWbTargets = [
-            "https://weibo.com/3136375497",
-            "https://weibo.com/u/5638891142",
-            "https://weibo.com/u/7617585695",
-            "https://weibo.com/u/2462905490",
-            "https://weibo.com/u/6537754228",
-            "https://weibo.com/5889398001",
-            "https://weibo.com/2073298963",
-            "https://weibo.com/2786659525",
-            "https://weibo.com/2531071125",
-            "https://weibo.com/7317743892",
-            "https://weibo.com/u/3832084542",
+            "https://weibo.com/3949708968",
             "https://weibo.com/5873857966",
             "https://weibo.com/u/7617585695",
-            "https://weibo.com/u/5361306361",
-            "https://weibo.com/2073298963",
-            "https://weibo.com/u/7960412164",
-            "https://weibo.com/u/6411589951",
-            "https://weibo.com/7886945717",
-            "https://weibo.com/u/7617585695",
-            "https://weibo.com/u/6188204640",
-            "https://weibo.com/u/1745046144",
-            "https://weibo.com/3949708968",
-            "https://weibo.com/2073298963",
-            "https://weibo.com/u/7866313834",
-            "https://weibo.com/5889398001",
-            "https://weibo.com/u/3218573045",
             "https://weibo.com/u/2132531824",
-            "https://weibo.com/u/5638891142",
+            "https://weibo.com/u/6188204640",
+            "https://weibo.com/u/7866313834",
+            "https://weibo.com/u/7960412164",
             "https://weibo.com/2073298963",
-            "https://weibo.com/2073298963",
+            "https://weibo.com/u/5361306361",
+            "https://weibo.com/7317743892",
+            "https://weibo.com/2531071125",
+            "https://weibo.com/2786659525",
+            "https://weibo.com/u/6537754228",
+            "https://weibo.com/u/2462905490"
     ]
     case 3: ##漫展攻略
         curFeishuAppToken = "GYnKbo7sIaHm5zseN4gc1NM0nzg"
@@ -145,6 +111,46 @@ match TASK_TYPE:
             "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
         ]
         WEIBO_TARGET_URLS = []
+    case 4:  ##模型上新情报
+        curFeishuAppToken = "Gc9CblE4maBzzPsx4DCcyNKbnaf"
+        curXhsTableId = "tblvfsjzRE0rPSp9"
+        curWbTableId = "tblYeUADNDj94KWk"
+        curXhsTargets = [
+            
+        ]
+        curWbTargets = [
+            "https://weibo.com/u/7411704896",
+            "https://weibo.com/u/6876869557",
+            "https://weibo.com/u/6019162065",
+            "https://weibo.com/u/7790031436",
+            "https://weibo.com/u/3903547693",
+            "https://weibo.com/u/7570941228",
+            "https://weibo.com/u/7483371607",
+            "https://weibo.com/u/3937986035",
+            "https://weibo.com/u/7306606797",
+            "https://weibo.com/u/6287858398",
+            "https://weibo.com/u/7898868903",
+            "https://weibo.com/u/6218707574",
+            "https://weibo.com/u/7269915751",
+            "https://weibo.com/u/5976787598",
+            "https://weibo.com/7875770784",
+            "https://weibo.com/u/7741654964",
+            "https://weibo.com/u/7586264459",
+            "https://weibo.com/7707583095",
+            "https://weibo.com/u/2707183173",
+            "https://weibo.com/7997821939",
+            "https://weibo.com/6089959951",
+            "https://weibo.com/7961348211",
+            "https://weibo.com/7595731999",
+            "https://weibo.com/u/1794868400",
+            "https://weibo.com/u/7283011762",
+            "https://weibo.com/u/7716811519",
+            "https://weibo.com/u/2805898290",
+            "https://weibo.com/u/7181070055",
+            "https://weibo.com/u/6694667657",
+            "https://weibo.com/7383325027",
+            "https://weibo.com/7671798601"
+        ]
 
 
 
@@ -178,6 +184,8 @@ WEIBO_TARGET_URLS = curWbTargets
 
 # Playwright 会话状态文件路径，用于保存登录状态
 XHS_AUTH_STATE_PATH = "auth_state.json"
+# 微博登录态文件，运行 weibo_login_helper.py 生成
+WEIBO_AUTH_STATE_PATH = "weibo_auth_state.json"
 
 # 是否使用无头模式运行浏览器（默认否）。
 # 可通过环境变量 XHS_HEADLESS=1/true/yes 开启无头模式（如在服务器/CI上）。
@@ -197,7 +205,6 @@ FEISHU_FIELD_MAPPING_XHS = {
     "post_url": "笔记链接",       # 笔记链接 (URL)
     "title": "标题",          # 笔记标题 (单行文本)
     "author_name": "作者",    # 作者名称 (单行文本)
-    "tags": "标签",               # 标签 (单行文本)
     "likes_count": "点赞数",      # 点赞数 (数字)
     "collections_count": "收藏数",# 收藏数 (数字)
     "comments_count": "评论数",   # 评论数 (数字)

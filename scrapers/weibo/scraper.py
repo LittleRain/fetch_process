@@ -15,12 +15,16 @@ class WeiboHomeScraper:
         self.context = context
         self.page: Optional[Page] = None
 
+    async def _new_prepared_page(self) -> Page:
+        page = await self.context.new_page()
+        await page.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+        )
+        return page
+
     async def _ensure_page(self) -> Page:
         if self.page is None or self.page.is_closed():
-            self.page = await self.context.new_page()
-            await self.page.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-            )
+            self.page = await self._new_prepared_page()
         return self.page
 
     async def close(self):
@@ -259,6 +263,7 @@ class WeiboHomeScraper:
 
         # 初次加载后等待，确保首屏渲染完整
         await page.wait_for_timeout(1000)
+        await self._ensure_logged_in(page)
 
         seen_ids: set[str] = set()
         collected_by_idx: Dict[int, Dict] = {}
@@ -550,11 +555,16 @@ class WeiboHomeScraper:
 
         detail_page: Optional[Page] = None
         try:
-            detail_page = await self.context.new_page()
+            detail_page = await self._new_prepared_page()
             try:
                 await detail_page.goto(url, wait_until="domcontentloaded")
             except PlaywrightTimeoutError:
                 await detail_page.goto(url)
+
+            try:
+                await self._ensure_logged_in(detail_page)
+            except Exception:
+                return None
 
             try:
                 await detail_page.wait_for_selector(
@@ -771,3 +781,32 @@ class WeiboHomeScraper:
                     await detail_page.close()
                 except Exception:
                     pass
+
+    async def _ensure_logged_in(self, page: Page) -> None:
+        if await self._is_logged_out(page):
+            raise RuntimeError("微博登录状态已失效，请重新运行 weibo_login_helper.py 更新会话。")
+
+    @staticmethod
+    async def _is_logged_out(page: Page) -> bool:
+        try:
+            url = (page.url or "").lower()
+            if "passport.weibo.com" in url or "weibo.com/login" in url:
+                return True
+        except Exception:
+            pass
+        try:
+            return await page.evaluate(
+                """() => {
+                    const bodyText = (document.body?.innerText || '').slice(0, 2000);
+                    if (bodyText.includes('登录微博') || bodyText.includes('手机号码登录')) return true;
+                    const loginForm = document.querySelector('input[name="username"], form[action*="login"], form[action*="passport"]');
+                    if (loginForm) return true;
+                    const loginBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+                        const txt = (el.textContent || '').trim();
+                        return txt.includes('登录') || txt.includes('登 录');
+                    });
+                    return !!loginBtn;
+                }"""
+            )
+        except Exception:
+            return False

@@ -12,6 +12,8 @@ from feishu_client import FeishuClient
 from scrapers.wechat.scraper import WeChatArticleScraper
 from scrapers.weibo.scraper import WeiboHomeScraper
 
+CONTENT_VALID_WINDOW_DAYS = int(getattr(config, "WITHIN_LAST_DAYS", 10) or 10)
+
 
 def _is_within_last_days(post_time: str, window_days: int) -> bool:
     """判断给定的发布日期是否在最近 window_days 天内。"""
@@ -93,8 +95,8 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
 
 
 def _is_within_last_month(post_time: str) -> bool:
-    """保留兼容函数，判断是否在最近30天内。"""
-    return _is_within_last_days(post_time, 10)
+    """保留兼容函数，使用统一配置的内容有效期窗口。"""
+    return _is_within_last_days(post_time, CONTENT_VALID_WINDOW_DAYS)
 
 async def main():
     """主函数，编排整个爬取和写入流程"""
@@ -334,12 +336,12 @@ async def main():
 
                         if is_xhs_task:
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, 10)
+                            is_expired = not _is_within_last_days(post_time_str, CONTENT_VALID_WINDOW_DAYS)
                             if is_expired:
                                 print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
                         elif t_type == 'weibo_home':
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, 10)
+                            is_expired = not _is_within_last_days(post_time_str, CONTENT_VALID_WINDOW_DAYS)
                             if is_expired:
                                 print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
                         else:
@@ -451,7 +453,7 @@ async def main():
 
                                 if t_type == 'weibo_home':
                                     summary_post_time = note_info.get('post_time')
-                                    if summary_post_time and not _is_within_last_days(summary_post_time, 10):
+                                    if summary_post_time and not _is_within_last_days(summary_post_time, CONTENT_VALID_WINDOW_DAYS):
                                         print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
                                         continue
 

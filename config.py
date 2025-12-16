@@ -1,7 +1,9 @@
 # --*-- coding: utf-8 --*--
 import os
 
-TASK_TYPE = 1 #1:IP资讯; 2:漫展官方情报; 3:漫展攻略 4:模型上新情报
+TASK_TYPE = 2  # 1:IP资讯; 2:漫展官方情报; 3:漫展攻略 4:模型上新情报
+# 统一配置内容有效期（天），由业务场景控制
+WITHIN_LAST_DAYS = 10
 match TASK_TYPE:
     case 1:  ##IP资讯
         curFeishuAppToken = "K9orbPg4harHLwsywv5cMvUMn2e"
@@ -19,7 +21,8 @@ match TASK_TYPE:
             "https://weibo.com/u/1195908387",
             "https://weibo.com/u/2686948620"
         ]
-    case 2: ##官方情报
+        WITHIN_LAST_DAYS = 10
+    case 2:  ##官方情报
         curFeishuAppToken = "LDSjbNlMdadMlNsuFq6cli4Anlc"
         curXhsTableId = "tbl3fl5oaC1PNMeN"
         curWbTableId = "tblisrHchFiWYU7f"
@@ -98,8 +101,9 @@ match TASK_TYPE:
             "https://weibo.com/2786659525",
             "https://weibo.com/u/6537754228",
             "https://weibo.com/u/2462905490"
-    ]
-    case 3: ##漫展攻略
+        ]
+        WITHIN_LAST_DAYS = 3
+    case 3:  ##漫展攻略
         curFeishuAppToken = "GYnKbo7sIaHm5zseN4gc1NM0nzg"
         curXhsTableId = "tbloiTbxqmYBdGiz"
         curWbTableId = ""
@@ -111,6 +115,7 @@ match TASK_TYPE:
             "https://www.xiaohongshu.com/user/profile/678393bc000000000803ce90"
         ]
         WEIBO_TARGET_URLS = []
+        WITHIN_LAST_DAYS = 10
     case 4:  ##模型上新情报
         curFeishuAppToken = "Gc9CblE4maBzzPsx4DCcyNKbnaf"
         curXhsTableId = "tblvfsjzRE0rPSp9"
@@ -151,6 +156,7 @@ match TASK_TYPE:
             "https://weibo.com/7383325027",
             "https://weibo.com/7671798601"
         ]
+        WITHIN_LAST_DAYS = 3
 
 
 

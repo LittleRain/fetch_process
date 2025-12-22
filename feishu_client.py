@@ -1,9 +1,10 @@
 import time
+import asyncio
 import json as _json
 import config
 from typing import Dict, List, Any, Optional
 from urllib.parse import quote
-from playwright.async_api import APIRequestContext
+from playwright.async_api import APIRequestContext, Error as PlaywrightError
 
 class FeishuClient:
     BASE_URL = "https://open.feishu.cn/open-apis"
@@ -28,6 +29,9 @@ class FeishuClient:
         self._token_expiry_time = 0
         self.request_context = request_context
         self._field_types_cache: Dict[str, Any] = {}
+        self.request_timeout_ms = int(getattr(config, "FEISHU_REQUEST_TIMEOUT_MS", 60000) or 60000)
+        self.request_max_retries = int(getattr(config, "FEISHU_REQUEST_MAX_RETRIES", 3) or 3)
+        self.request_retry_backoff_sec = int(getattr(config, "FEISHU_REQUEST_RETRY_BACKOFF_SECONDS", 2) or 2)
 
     async def _get_field_types(self) -> Dict[str, Any]:
         """获取并缓存表字段的类型映射: {显示名称: 类型}
@@ -41,7 +45,7 @@ class FeishuClient:
         types: Dict[str, Any] = {}
         while True:
             u = url if not page_token else (url + f"&page_token={page_token}")
-            resp = await self.request_context.get(u, headers=headers)
+            resp = await self.request_context.get(u, headers=headers, timeout=self.request_timeout_ms)
             try:
                 data = await resp.json()
             except Exception:
@@ -121,7 +125,11 @@ class FeishuClient:
 
         url = f"{self.BASE_URL}/auth/v3/tenant_access_token/internal"
         payload = {"app_id": self.app_id, "app_secret": self.app_secret}
-        response = await self.request_context.post(url, data=payload)
+        response = await self._post_with_retry(
+            url,
+            data=payload,
+            purpose="获取 tenant_access_token"
+        )
         data = await response.json()
 
         if data.get("code") == 0:
@@ -136,9 +144,45 @@ class FeishuClient:
         token = await self._get_tenant_access_token()
         return {"Authorization": f"Bearer {token}"}
 
+    async def _post_with_retry(self, url: str, *, headers: Optional[Dict[str, str]] = None,
+                               timeout_ms: Optional[int] = None, purpose: str = "POST", **kwargs):
+        """对飞书 POST 请求增加超时和重试保护。"""
+        max_attempts = max(1, self.request_max_retries)
+        timeout_val = timeout_ms if timeout_ms is not None else self.request_timeout_ms
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                request_kwargs = dict(kwargs)
+                request_kwargs["timeout"] = timeout_val if timeout_val is not None else self.request_timeout_ms
+                if headers is not None:
+                    request_kwargs["headers"] = headers
+                return await self.request_context.post(url, **request_kwargs)
+            except PlaywrightError as e:
+                last_error = e
+                is_timeout = "ETIMEDOUT" in str(e) or "Timeout" in str(e)
+                if is_timeout and attempt < max_attempts:
+                    delay = min(self.request_retry_backoff_sec * attempt, 10)
+                    print(f"[FeishuClient] {purpose} 超时，{delay}s后重试 ({attempt}/{max_attempts})")
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    delay = min(self.request_retry_backoff_sec * attempt, 10)
+                    print(f"[FeishuClient] {purpose} 异常，{delay}s后重试 ({attempt}/{max_attempts}): {e}")
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise Exception(f"{purpose} 请求失败，未知错误")
+
     async def _download_image(self, url: str) -> bytes:
         """下载图片并返回二进制内容"""
-        response = await self.request_context.get(url)
+        response = await self.request_context.get(url, timeout=self.request_timeout_ms)
         if not response.ok:
             raise Exception(f"下载图片失败: {url}")
         return await response.body()
@@ -148,7 +192,7 @@ class FeishuClient:
         url = f"{self.BASE_URL}/drive/v1/medias/upload_all"
         headers = await self._get_auth_headers()
         
-        response = await self.request_context.post(
+        response = await self._post_with_retry(
             url,
             headers=headers,
             multipart={
@@ -156,7 +200,8 @@ class FeishuClient:
                 "parent_type": "bitable_image",
                 "parent_node": self.base_app_token,
                 "size": str(len(image_bytes)),
-            }
+            },
+            purpose="上传图片"
         )
         data = await response.json()
         if data.get("code") == 0:
@@ -173,7 +218,7 @@ class FeishuClient:
         print(f"[FeishuClient] 查询去重: app_token={self.base_app_token} table_id={self.table_id} note_id={note_id}")
         
         headers = await self._get_auth_headers()
-        response = await self.request_context.get(url, headers=headers)
+        response = await self.request_context.get(url, headers=headers, timeout=self.request_timeout_ms)
         data = await response.json()
 
         if not response.ok:
@@ -236,10 +281,12 @@ class FeishuClient:
                 payload = dict(payload_base)
                 if page_token:
                     payload["page_token"] = page_token
-                resp = await self.request_context.post(
+                resp = await self._post_with_retry(
                     search_url,
                     headers=headers,
                     data=_json.dumps(payload, ensure_ascii=False),
+                    timeout_ms=self.request_timeout_ms,
+                    purpose="批量查询记录"
                 )
                 try:
                     data = await resp.json()
@@ -341,7 +388,13 @@ class FeishuClient:
         while True:
             payload_str = _json.dumps(payload, ensure_ascii=False)
             _print_req(url, headers, payload, attempt)
-            response = await self.request_context.post(url, headers=headers, data=payload_str)
+            response = await self._post_with_retry(
+                url,
+                headers=headers,
+                data=payload_str,
+                timeout_ms=self.request_timeout_ms,
+                purpose="写入记录"
+            )
             resp_text = ""
             try:
                 resp_text = await response.text()

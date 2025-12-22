@@ -15,24 +15,52 @@ from scrapers.weibo.scraper import WeiboHomeScraper
 CONTENT_VALID_WINDOW_DAYS = int(getattr(config, "WITHIN_LAST_DAYS", 10) or 10)
 
 
-def _is_within_last_days(post_time: str, window_days: int) -> bool:
+def _format_age_days(age_days):
+    return "未知" if age_days is None else f"{age_days:.2f}"
+
+
+def _is_within_last_days(post_time: str, window_days: int, *, return_age: bool = False):
     """判断给定的发布日期是否在最近 window_days 天内。"""
     if not post_time:
-        return False
+        return (False, None) if return_age else False
     text = str(post_time).strip()
     if not text:
-        return False
+        return (False, None) if return_age else False
 
     now = datetime.now()
-    lower_text = text.lower()
+
+    def _wrap(result: bool, dt=None, age_days=None):
+        if return_age:
+            if age_days is None and dt is not None:
+                age_days = (now - dt).total_seconds() / 86400
+            return result, age_days
+        return result
+
+    relative_match = re.match(r"^\s*(\d+)\s*(秒钟?|分钟|小时)前\s*$", text)
+    if relative_match:
+        n = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        if "秒" in unit:
+            delta = timedelta(seconds=n)
+        elif "小时" in unit:
+            delta = timedelta(hours=n)
+        else:
+            delta = timedelta(minutes=n)
+        return _wrap(True, now - delta)
 
     # 情况1：相对时间（分钟/小时内）视为近30天
     if any(keyword in text for keyword in ("刚刚", "秒前", "分钟前", "小时内", "小时前")):
-        return True
+        return _wrap(True, now)
 
     # 情况2：昨天/今天/前天 -> 视为近30天
     if any(keyword in text for keyword in ("昨天", "今日", "今天", "前天")):
-        return True
+        if "前天" in text:
+            dt = now - timedelta(days=2)
+        elif "昨天" in text:
+            dt = now - timedelta(days=1)
+        else:
+            dt = now
+        return _wrap(True, dt)
 
     # 情况3：匹配 mm-dd 或 mm-dd HH:mm
     mmdd_match = re.match(
@@ -49,16 +77,16 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
         try:
             dt = datetime(year, month, day, hour, minute, second)
         except ValueError:
-            return False
+            return _wrap(False)
         # 处理跨年：如果日期在未来太多，视作上一年
         if dt > now + timedelta(days=1):
             try:
                 dt = dt.replace(year=year - 1)
             except ValueError:
-                return False
+                return _wrap(False)
         if dt > now:
-            return True
-        return dt >= now - timedelta(days=window_days)
+            return _wrap(True, dt)
+        return _wrap(dt >= now - timedelta(days=window_days), dt)
 
     # 情况4：匹配 yyyy-mm-dd 或 yyyy-mm-dd HH:mm
     ymd_match = re.match(
@@ -75,10 +103,10 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
         try:
             dt = datetime(year, month, day, hour, minute, second)
         except ValueError:
-            return False
+            return _wrap(False)
         if dt > now:
-            return True
-        return dt >= now - timedelta(days=window_days)
+            return _wrap(True, dt)
+        return _wrap(dt >= now - timedelta(days=window_days), dt)
 
     # 情况5：尝试标准格式解析
     parse_formats = ["%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"]
@@ -86,12 +114,12 @@ def _is_within_last_days(post_time: str, window_days: int) -> bool:
         try:
             parsed = datetime.strptime(text, fmt)
             if parsed > now:
-                return True
-            return parsed >= now - timedelta(days=window_days)
+                return _wrap(True, parsed)
+            return _wrap(parsed >= now - timedelta(days=window_days), parsed)
         except ValueError:
             continue
 
-    return False
+    return _wrap(False)
 
 
 def _is_within_last_month(post_time: str) -> bool:
@@ -336,14 +364,26 @@ async def main():
 
                         if is_xhs_task:
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, CONTENT_VALID_WINDOW_DAYS)
+                            is_recent, age_days = _is_within_last_days(
+                                post_time_str, CONTENT_VALID_WINDOW_DAYS, return_age=True
+                            )
+                            is_expired = not is_recent
                             if is_expired:
-                                print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
+                                print(
+                                    f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str} "
+                                    f"age_days={_format_age_days(age_days)} window={CONTENT_VALID_WINDOW_DAYS}"
+                                )
                         elif t_type == 'weibo_home':
                             post_time_str = note_details_inner.get("post_time")
-                            is_expired = not _is_within_last_days(post_time_str, CONTENT_VALID_WINDOW_DAYS)
+                            is_recent, age_days = _is_within_last_days(
+                                post_time_str, CONTENT_VALID_WINDOW_DAYS, return_age=True
+                            )
+                            is_expired = not is_recent
                             if is_expired:
-                                print(f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str}")
+                                print(
+                                    f"[过期] 跳过 id={note_id_val_str_inner} post_time={post_time_str} "
+                                    f"age_days={_format_age_days(age_days)} window={CONTENT_VALID_WINDOW_DAYS}"
+                                )
                         else:
                             is_expired = False
 
@@ -453,8 +493,16 @@ async def main():
 
                                 if t_type == 'weibo_home':
                                     summary_post_time = note_info.get('post_time')
-                                    if summary_post_time and not _is_within_last_days(summary_post_time, CONTENT_VALID_WINDOW_DAYS):
-                                        print(f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time}")
+                                    if summary_post_time:
+                                        is_recent, age_days = _is_within_last_days(
+                                            summary_post_time, CONTENT_VALID_WINDOW_DAYS, return_age=True
+                                        )
+                                        if not is_recent:
+                                            print(
+                                                f"[过期] 跳过 id={note_id_val_str} post_time={summary_post_time} "
+                                                f"age_days={_format_age_days(age_days)} window={CONTENT_VALID_WINDOW_DAYS}"
+                                            )
+                                            continue
                                         continue
 
                                 if t_type == 'wechat_articles':

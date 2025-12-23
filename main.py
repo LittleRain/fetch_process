@@ -503,8 +503,6 @@ async def main():
                                                 f"age_days={_format_age_days(age_days)} window={CONTENT_VALID_WINDOW_DAYS}"
                                             )
                                             continue
-                                        continue
-
                                 if t_type == 'wechat_articles':
                                     note_details = await wechat_scraper.scrape_article_details(note_info)
                                 else:

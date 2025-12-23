@@ -1,7 +1,7 @@
 # --*-- coding: utf-8 --*--
 import os
 
-TASK_TYPE = 1  # 1:IP资讯; 2:漫展官方情报; 3:漫展攻略 4:模型上新情报
+TASK_TYPE = 2  # 1:IP资讯; 2:漫展官方情报; 3:漫展攻略 4:模型上新情报
 # 统一配置内容有效期（天），由业务场景控制
 WITHIN_LAST_DAYS = 10
 match TASK_TYPE:
@@ -206,7 +206,7 @@ WEIBO_AUTH_STATE_PATH = "weibo_auth_state.json"
 # 是否使用无头模式运行浏览器（默认否）。
 # 可通过环境变量 XHS_HEADLESS=1/true/yes 开启无头模式（如在服务器/CI上）。
 # XHS_HEADLESS = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", "yes")
-XHS_HEADLESS = False
+XHS_HEADLESS = True
 
 
 # ===============================================================================
@@ -285,7 +285,7 @@ TASKS = [
         "params": {
             "urls": WEIBO_TARGET_URLS,
             "per_account_limit": 10,
-            "scrolls": 3,
+            "scrolls": 10,
         },
     },
 ]

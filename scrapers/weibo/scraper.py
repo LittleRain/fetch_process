@@ -191,6 +191,26 @@ class WeiboHomeScraper:
             except Exception:
                 continue
 
+        # 处理两位年份，如 "25-12-21 15:46" 表示 2025-12-21
+        yymmdd_match = re.match(
+            r"(?P<yy>\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})(?:\s+(?P<hour>\d{1,2}):(?P<minute>\d{1,2})(?::(?P<second>\d{1,2}))?)?$",
+            normalized,
+        )
+        if yymmdd_match:
+            yy = int(yymmdd_match.group("yy"))
+            year = 2000 + yy if yy < 100 else yy
+            month = int(yymmdd_match.group("month"))
+            day = int(yymmdd_match.group("day"))
+            hour = int(yymmdd_match.group("hour") or 0)
+            minute = int(yymmdd_match.group("minute") or 0)
+            second = int(yymmdd_match.group("second") or 0)
+            try:
+                dt = datetime(year, month, day, hour, minute, second)
+                dt = apply_ampm(dt, include_time=True)
+                return format_dt(dt, include_time=True)
+            except Exception:
+                pass
+
         # 处理缺少年份的情况，例如 "11-4 20:16"
         mmdd_match = re.match(
             r"(?P<month>\d{1,2})-(?P<day>\d{1,2})(?:\s+(?P<hour>\d{1,2}):(?P<minute>\d{1,2})(?::(?P<second>\d{1,2}))?)?$",
@@ -325,6 +345,9 @@ class WeiboHomeScraper:
                                     idxNum = num;
                                 }
                             }
+                            const article = item.querySelector('article');
+                            const header = (article && article.querySelector('header')) || item.querySelector('header');
+                            const timeLink = header ? header.querySelector('a[class*=\"_time_\"]') : null;
                             const linkSelectors = [
                                 'a[class*=\"head-info_time_\"]',
                                 'a[href*=\"m.weibo.cn/detail\"]',
@@ -332,12 +355,25 @@ class WeiboHomeScraper:
                                 'a[href*=\"/detail/\"]',
                                 'a[href*=\"/profile/\"]',
                             ];
-                            let link = null;
-                            for (const sel of linkSelectors) {
-                                const candidate = item.querySelector(sel);
-                                if (candidate) { link = candidate; break; }
+                            let link = timeLink || null;
+                            if (!link) {
+                                for (const sel of linkSelectors) {
+                                    const candidate = item.querySelector(sel);
+                                    if (candidate) { link = candidate; break; }
+                                }
                             }
-                            const href = link ? (link.getAttribute('href') || '') : '';
+                            const normalizeHref = (u) => {
+                                if (!u) return '';
+                                const val = String(u).trim();
+                                if (!val) return '';
+                                if (/\\.(?:jpe?g|png|gif|webp|svg)(\\?|$)/i.test(val)) return '';
+                                return val;
+                            };
+                            const headerEl = header && header.hasAttribute('id') ? header : item.querySelector('header[id]');
+                            const headerId = headerEl ? (headerEl.getAttribute('id') || '') : '';
+                            const headerLink = headerEl ? headerEl.querySelector('a[class*=\"_time_\"], a[class*=\"time_\"]') : null;
+                            const headerHref = normalizeHref(headerLink ? (headerLink.getAttribute('href') || '') : '');
+                            const href = normalizeHref(link ? (link.getAttribute('href') || '') : '');
                             const rawTime = link ? (link.textContent || '').trim() : '';
                             const rect = item.getBoundingClientRect();
                             const authorEl = item.querySelector('a[class*=\"head-info_nick_\"], a[class*=\"name\"], a[node-type=\"feed_list_originNick\"]');
@@ -349,8 +385,10 @@ class WeiboHomeScraper:
                                 idxRaw: idxAttr,
                                 idxNum,
                                 order,
+                                headerHref,
                                 href,
                                 rawTime,
+                                headerId,
                                 author,
                                 top: (rect.top || 0) + (window.scrollY || 0),
                                 mid,
@@ -380,9 +418,11 @@ class WeiboHomeScraper:
                     idx_val = _parse_idx(entry.get("idxRaw"), entry.get("idxNum"))
                     if idx_val is None and entry.get("idxRaw"):
                         print(f"[WeiboHomeScraper] 无法解析 idxRaw={entry.get('idxRaw')} idxNum={entry.get('idxNum')} order={entry.get('order')} top={entry.get('top')}")
-                    href = entry.get("href") or ""
+                    header_href = entry.get("headerHref") or ""
+                    href = header_href or entry.get("href") or ""
                     candidate_mid = entry.get("mid") or entry.get("feedId") or ""
-                    note_id = self._normalize_post_id(href)
+                    header_id = entry.get("headerId") or ""
+                    note_id = header_id or self._normalize_post_id(href)
                     if not note_id and candidate_mid:
                         note_id = candidate_mid.strip()
                     if not note_id:
@@ -416,6 +456,7 @@ class WeiboHomeScraper:
                             "note_id": note_id or "",
                             "url": self._normalize_url(href),
                             "raw_href": href,
+                            "header_href": header_href,
                             "post_time": post_time,
                             "author_name": author_name,
                             "raw_time": raw_time,
@@ -432,7 +473,7 @@ class WeiboHomeScraper:
                         seen_ids.add(note_id)
 
                     print(
-                        f"  idx={idx_display} {tag} note_id={note_id or 'N/A'} time_text={raw_time} author={author_name} href={href} mid={candidate_mid or ''} top={top_val:.1f}"
+                        f"  idx={idx_display} {tag} note_id={note_id or 'N/A'} header_id={header_id or 'N/A'} time_text={raw_time} author={author_name} href={href} header_href={header_href or 'N/A'} mid={candidate_mid or ''} top={top_val:.1f}"
                     )
                     if is_new_idx and len(collected_by_idx) >= max_posts:
                         return True
@@ -548,9 +589,34 @@ class WeiboHomeScraper:
         """
         根据列表项打开详情，抓取内容并整理为统一结构。
         """
-        url = post_ref.get("url") or post_ref.get("raw_href") or ""
+        note_id_log = post_ref.get("note_id") or ""
+        url = (
+            post_ref.get("url")
+            or post_ref.get("header_href")
+            or post_ref.get("raw_href")
+            or ""
+        )
         url = self._normalize_url(url)
+        def _is_image_link(u: str) -> bool:
+            if not u:
+                return False
+            try:
+                core = u.split("#", 1)[0]
+            except Exception:
+                core = u
+            return bool(re.search(r"\.(?:jpe?g|png|gif|webp|svg)(?:$|\\?)", core, re.IGNORECASE))
+        def _log_detail(msg: str):
+            print(f"[WeiboDetail] note_id={note_id_log or 'N/A'} url={url} {msg}")
+        if _is_image_link(url):
+            _log_detail("检测到图片链接，丢弃并尝试用 note_id 构造详情链接")
+            url = ""
+        if not url and note_id_log:
+            url = f"https://weibo.com/detail/{note_id_log}"
+        if _is_image_link(url):
+            _log_detail("原因=链接仍为图片，放弃抓取")
+            return None
         if not url:
+            _log_detail("原因=url为空")
             return None
 
         detail_page: Optional[Page] = None
@@ -563,7 +629,8 @@ class WeiboHomeScraper:
 
             try:
                 await self._ensure_logged_in(detail_page)
-            except Exception:
+            except Exception as e:
+                _log_detail(f"登录态失效或检查失败: {e}")
                 return None
 
             try:
@@ -577,7 +644,7 @@ class WeiboHomeScraper:
             await detail_page.wait_for_timeout(2000)
             is_video_detail = False
             try:
-                video_locator = detail_page.locator('[class*="card-video"]')
+                video_locator = detail_page.locator('video, [class*="card-video"], [class*="video-player"], [class*="Video"]')
                 if await video_locator.count() > 0:
                     is_video_detail = True
             except Exception:
@@ -589,28 +656,107 @@ class WeiboHomeScraper:
             except Exception:
                 pass
 
-            content_selectors = [
-                "div[class*='detail_wbtext_']",
-                "div[class*='detail_wbtext']",
-                "article div[class*='text']",
-                "article",
-            ]
-            content_text = await self._first_text(detail_page, content_selectors)
+            content_text = ""
+            try:
+                content_text = await detail_page.eval_on_selector(
+                    ".wbpro-feed-ogText", "el => (el.innerText || '').trim()"
+                )
+            except Exception:
+                content_text = ""
+            if not content_text:
+                content_selectors = [
+                    "div[class*='detail_wbtext_']",
+                    "div[class*='detail_wbtext']",
+                    "div._wbtext_1psp9_14",
+                    "div[class*='_wbtext_']",
+                    "div[class*='wbtext']",
+                    "article div[class*='text']",
+                    "article [class*='text']",
+                    "section[class*='Detail']",
+                    "div[class*='Detail_text']",
+                    "div[class*='Fullfeed']",
+                    "div[class*='WooPanel-main']",
+                    "article",
+                ]
+                content_text = await self._first_text(detail_page, content_selectors)
             if not content_text:
                 try:
-                    content_text = await detail_page.evaluate("() => document.body.innerText || ''")
+                    candidates = await detail_page.evaluate(
+                        """() => {
+                            const selectors = [
+                                'article',
+                                'section[class*="Detail"]',
+                                'div[class*="Detail"]',
+                                'div[class*="Fullfeed"]',
+                                'div[class*="WooPanel-main"]'
+                            ];
+                            const results = [];
+                            const seen = new Set();
+                            const add = (el) => {
+                                if (!el || seen.has(el)) return;
+                                seen.add(el);
+                                const text = (el.innerText || '').trim();
+                                if (text) results.push({ text, len: text.length });
+                            };
+                            for (const sel of selectors) {
+                                document.querySelectorAll(sel).forEach(add);
+                            }
+                            if (!results.length && document.body) {
+                                const text = (document.body.innerText || '').trim();
+                                if (text) results.push({ text, len: text.length });
+                            }
+                            results.sort((a, b) => b.len - a.len);
+                            return results.slice(0, 1);
+                        }"""
+                    )
+                    if isinstance(candidates, list) and candidates:
+                        content_text = candidates[0].get("text") or ""
+                    else:
+                        content_text = ""
                 except Exception:
                     content_text = ""
-            content_text = content_text.strip()
+            content_text = (content_text or "").strip()
 
             author_selectors = [
                 "a[class*='detail_userName_']",
                 "a[node-type='feed_list_originNick']",
                 "div[class*='WB_info'] a",
             ]
-            author_name = await self._first_text(detail_page, author_selectors) or post_ref.get("author_name", "")
+            try:
+                author_name = await detail_page.eval_on_selector(
+                    "a[class*='_name_'] span", "el => (el.textContent || '').trim()"
+                )
+            except Exception:
+                author_name = ""
+            if not author_name:
+                try:
+                    candidate = await detail_page.evaluate(
+                        """() => {
+                            const nodes = Array.from(document.querySelectorAll('[usercard]'));
+                            for (const node of nodes) {
+                                const tag = (node.tagName || '').toLowerCase();
+                                if (tag === 'a') {
+                                    const span = node.querySelector('span');
+                                    const txt = span ? (span.textContent || '') : (node.textContent || '');
+                                    const val = txt.trim();
+                                    if (val) return val;
+                                } else if (tag === 'span') {
+                                    const txt = (node.textContent || '').trim();
+                                    if (txt) return txt;
+                                }
+                            }
+                            return '';
+                        }"""
+                    )
+                    if isinstance(candidate, str) and candidate.strip():
+                        author_name = candidate.strip()
+                except Exception:
+                    pass
+            if not author_name:
+                author_name = await self._first_text(detail_page, author_selectors) or post_ref.get("author_name", "")
 
             time_selectors = [
+                "header a[class*='_time_']",
                 "time",
                 "a[class*='detail_time_']",
                 "span[class*='head-info_time_']",
@@ -624,31 +770,98 @@ class WeiboHomeScraper:
                 post_time = self._normalize_post_time(post_ref.get("raw_time"))
 
             image_urls: List[str] = []
+            is_video_from_picture = False
             try:
-                image_candidates = await detail_page.evaluate(
+                pic_info = await detail_page.evaluate(
                     """() => {
-                        const selectors = [
-                            '[class*="picture_inlineNum3"]',
-                            '[class*="picture-box"]'
-                        ];
-                        const results = [];
-                        for (const sel of selectors) {
-                            const containers = Array.from(document.querySelectorAll(sel));
-                            for (const container of containers) {
-                                const imgs = Array.from(container.querySelectorAll('img'));
-                                for (const img of imgs) {
-                                    const cls = img.className || '';
-                                    if (typeof cls === 'string' && cls.includes('avatar')) continue;
-                                    const src = img.getAttribute('src') || img.dataset?.src || '';
-                                    if (src) {
-                                        results.push(src);
-                                    }
-                                }
+                        const picture = document.querySelector('.picture');
+                        const urls = [];
+                        let hasVideo = false;
+                        if (picture) {
+                            if (picture.querySelector('video')) {
+                                hasVideo = true;
+                                urls.push('视频');
+                            } else {
+                                picture.querySelectorAll('img').forEach(img => {
+                                    const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original') || '';
+                                    if (src) urls.push(src);
+                                });
                             }
                         }
-                        return results;
+                        return { urls, hasVideo };
                     }"""
                 )
+            except Exception:
+                pic_info = {"urls": [], "hasVideo": False}
+            if isinstance(pic_info, dict):
+                raw_pic_urls = pic_info.get("urls") or []
+                is_video_from_picture = bool(pic_info.get("hasVideo"))
+                for u in raw_pic_urls:
+                    if not u:
+                        continue
+                    url = u.strip()
+                    if url:
+                        image_urls.append(url)
+
+            # 兜底：额外收集媒体区域的图片/视频链接
+            try:
+                if not image_urls:
+                    image_candidates = await detail_page.evaluate(
+                        """() => {
+                            const selectors = [
+                                'article',
+                                'section[class*="Detail"]',
+                                'div[class*="Detail"]',
+                                'div[class*="Fullfeed"]',
+                                'div[class*="WooPanel-main"]',
+                                '[class*="picture_inlineNum3"]',
+                                '[class*="picture-box"]',
+                                'div._videoBox_19lrd_132',
+                                '[class*="media"]',
+                            ];
+                            const urls = new Set();
+                            const isAvatar = (img) => {
+                                const cls = (img.className || '').toLowerCase();
+                                if (cls.includes('avatar') || cls.includes('profile') || cls.includes('head')) return true;
+                                const w = Number(img.getAttribute('width') || img.width || 0);
+                                const h = Number(img.getAttribute('height') || img.height || 0);
+                                return (w && w <= 40) || (h && h <= 40);
+                            };
+                            const addUrl = (u) => {
+                                if (!u) return;
+                                const val = u.trim();
+                                if (val) urls.add(val);
+                            };
+                            for (const sel of selectors) {
+                                const nodes = document.querySelectorAll(sel);
+                                nodes.forEach(node => {
+                                    node.querySelectorAll('img').forEach(img => {
+                                        if (isAvatar(img)) return;
+                                        const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original') || '';
+                                        const srcset = img.getAttribute('srcset') || '';
+                                        addUrl(src);
+                                        if (srcset) {
+                                            srcset.split(',').forEach(part => {
+                                                const url = part.trim().split(' ')[0];
+                                                addUrl(url);
+                                            });
+                                        }
+                                    });
+                                    node.querySelectorAll('video').forEach(v => {
+                                        const poster = v.getAttribute('poster') || '';
+                                        const src = v.getAttribute('src') || '';
+                                        addUrl(poster);
+                                        addUrl(src);
+                                        const sources = v.querySelectorAll('source');
+                                        sources.forEach(s => addUrl(s.getAttribute('src') || ''));
+                                    });
+                                });
+                            }
+                            return Array.from(urls);
+                        }"""
+                    )
+                else:
+                    image_candidates = []
             except Exception:
                 image_candidates = []
             is_retweet = False
@@ -712,30 +925,79 @@ class WeiboHomeScraper:
                     if normalized and normalized not in image_urls:
                         image_urls.append(normalized)
 
+            # 规范化已收集的图片/媒体链接
+            normalized_media: List[str] = []
+            for raw in list(image_urls):
+                if not raw:
+                    continue
+                raw = raw.strip()
+                if not raw:
+                    continue
+                if raw == "视频":
+                    normalized_media.append(raw)
+                    continue
+                if raw.startswith("//"):
+                    normalized = "https:" + raw
+                elif raw.startswith("http"):
+                    normalized = raw
+                else:
+                    normalized = self._normalize_url(raw)
+                if normalized and normalized not in normalized_media:
+                    normalized_media.append(normalized)
+            image_urls = normalized_media
+            if is_video_from_picture or any(u == "视频" for u in image_urls):
+                is_video_detail = True
+
             stat_map = {"shares_count": "0", "likes_count": "0", "comments_count": "0"}
             try:
                 stats = await detail_page.evaluate(
                     """() => {
-                        const container = document.querySelector('[class*="toolbar_main"]');
-                        if (!container) return [];
-                        const items = Array.from(container.querySelectorAll('*')).filter(node => {
-                            const cls = node.className || '';
-                            return typeof cls === 'string' && cls.includes('toolbar_item');
-                        });
-                        return items.map(item => {
-                            const candidates = [
-                                item.querySelector('[class*=\"toolbar_num\"]'),
-                                item.querySelector('[class*=\"woo-like-count\"]'),
-                                item.querySelector('[class*=\"like-count\"]'),
-                            ];
-                            for (const node of candidates) {
-                                if (node && node.textContent) {
-                                    const txt = node.textContent.trim();
-                                    if (txt) return txt;
+                        // 返回 [转发, 评论, 点赞]，点赞严格遵循 woo-like-count 纯数字规则
+                        const textContent = (node) => (node && node.textContent ? node.textContent.trim() : '');
+                        const isPureNumber = (txt) => /^\\d+$/.test(String(txt || '').trim());
+                        const result = ["0", "0", "0"];
+
+                        const footer = document.querySelector('footer');
+                        if (footer) {
+                            const firstFlex = footer.querySelector('.woo-box-item-flex');
+                            if (firstFlex) {
+                                const likeDiv = firstFlex.querySelector('.woo-like-count');
+                                if (likeDiv) {
+                                    const txt = textContent(likeDiv);
+                                    result[2] = isPureNumber(txt) ? txt : "0";
+                                }
+                                const innerDivs = firstFlex.querySelectorAll(':scope > div > div');
+                                if (innerDivs.length >= 2) {
+                                    const span1 = innerDivs[0].querySelector('[class*="_num_"]') || innerDivs[0];
+                                    const span2 = innerDivs[1].querySelector('[class*="_num_"]') || innerDivs[1];
+                                    const txt1 = textContent(span1);
+                                    const txt2 = textContent(span2);
+                                    if (txt1) result[0] = txt1;
+                                    if (txt2) result[1] = txt2;
                                 }
                             }
-                            return '';
-                        }).slice(0, 3);
+                        }
+
+                        // 退化：尝试旧的 toolbar（仅填充转发/评论；点赞保持 woo-like-count 规则）
+                        const toolbar = document.querySelector('[class*="toolbar_main"]');
+                        if (toolbar) {
+                            const items = Array.from(toolbar.querySelectorAll('*')).filter(node => {
+                                const cls = node.className || '';
+                                return typeof cls === 'string' && cls.includes('toolbar_item');
+                            });
+                            items.slice(0, 3).forEach((item, idx) => {
+                                if (idx === 2) return; // 点赞仅取 woo-like-count
+                                const candidates = [
+                                    item.querySelector('[class*="toolbar_num"]'),
+                                    item.querySelector('[class*="like-count"]'),
+                                ];
+                                for (const node of candidates) {
+                                    const txt = textContent(node);
+                                    if (txt) { result[idx] = txt; break; }
+                                }
+                            });
+                        }
+                        return result;
                     }"""
                 )
                 if isinstance(stats, list) and stats:
@@ -745,10 +1007,14 @@ class WeiboHomeScraper:
                     stat_map["shares_count"] = normalized[0]
                     stat_map["comments_count"] = normalized[1]
                     stat_map["likes_count"] = normalized[2]
+                    if _is_image_link(url):
+                        _log_detail("原因=链接为图片，详情结果作废")
+                        return None
             except Exception:
                 pass
 
             if not content_text:
+                _log_detail("原因=正文为空或未找到内容节点")
                 return None
 
             title = content_text.split("\n", 1)[0][:60]
@@ -772,8 +1038,14 @@ class WeiboHomeScraper:
                 "is_video": is_video_detail or post_ref.get("is_video", False),
                 "isRetweet": "是" if is_retweet else "否",
             }
+            _log_detail(
+                f"抓取完成 post_time={post_time} raw_time={detail_time_raw} "
+                f"author={author_name} imgs={len(image_urls)} is_video={details['is_video']} "
+                f"shares={details['shares_count']} comments={details['comments_count']} likes={details['likes_count']}"
+            )
             return details
-        except Exception:
+        except Exception as e:
+            _log_detail(f"异常: {e}")
             return None
         finally:
             if detail_page is not None:

@@ -590,13 +590,13 @@ class WeiboHomeScraper:
         根据列表项打开详情，抓取内容并整理为统一结构。
         """
         note_id_log = post_ref.get("note_id") or ""
-        url = (
+        detail_url = (
             post_ref.get("url")
             or post_ref.get("header_href")
             or post_ref.get("raw_href")
             or ""
         )
-        url = self._normalize_url(url)
+        detail_url = self._normalize_url(detail_url)
         def _is_image_link(u: str) -> bool:
             if not u:
                 return False
@@ -606,16 +606,16 @@ class WeiboHomeScraper:
                 core = u
             return bool(re.search(r"\.(?:jpe?g|png|gif|webp|svg)(?:$|\\?)", core, re.IGNORECASE))
         def _log_detail(msg: str):
-            print(f"[WeiboDetail] note_id={note_id_log or 'N/A'} url={url} {msg}")
-        if _is_image_link(url):
+            print(f"[WeiboDetail] note_id={note_id_log or 'N/A'} url={detail_url} {msg}")
+        if _is_image_link(detail_url):
             _log_detail("检测到图片链接，丢弃并尝试用 note_id 构造详情链接")
-            url = ""
-        if not url and note_id_log:
-            url = f"https://weibo.com/detail/{note_id_log}"
-        if _is_image_link(url):
+            detail_url = ""
+        if not detail_url and note_id_log:
+            detail_url = f"https://weibo.com/detail/{note_id_log}"
+        if _is_image_link(detail_url):
             _log_detail("原因=链接仍为图片，放弃抓取")
             return None
-        if not url:
+        if not detail_url:
             _log_detail("原因=url为空")
             return None
 
@@ -623,9 +623,9 @@ class WeiboHomeScraper:
         try:
             detail_page = await self._new_prepared_page()
             try:
-                await detail_page.goto(url, wait_until="domcontentloaded")
+                await detail_page.goto(detail_url, wait_until="domcontentloaded")
             except PlaywrightTimeoutError:
-                await detail_page.goto(url)
+                await detail_page.goto(detail_url)
 
             try:
                 await self._ensure_logged_in(detail_page)
@@ -643,12 +643,29 @@ class WeiboHomeScraper:
 
             await detail_page.wait_for_timeout(2000)
             is_video_detail = False
+            has_video_box_in_content = False
             try:
                 video_locator = detail_page.locator('video, [class*="card-video"], [class*="video-player"], [class*="Video"]')
                 if await video_locator.count() > 0:
                     is_video_detail = True
             except Exception:
                 is_video_detail = False
+            try:
+                has_video_box_in_content = await detail_page.evaluate(
+                    """() => {
+                        const nodes = document.querySelectorAll('[class*="wbpro-feed-content"]');
+                        for (const node of nodes) {
+                            if (node.querySelector('div[class*="_videoBox_"]')) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }"""
+                )
+                if has_video_box_in_content:
+                    is_video_detail = True
+            except Exception:
+                has_video_box_in_content = False
             try:
                 for _ in range(3):
                     await detail_page.evaluate("window.scrollBy(0, Math.max(400, window.innerHeight))")
@@ -799,9 +816,9 @@ class WeiboHomeScraper:
                 for u in raw_pic_urls:
                     if not u:
                         continue
-                    url = u.strip()
-                    if url:
-                        image_urls.append(url)
+                    image_url = u.strip()
+                    if image_url:
+                        image_urls.append(image_url)
 
             # 兜底：额外收集媒体区域的图片/视频链接
             try:
@@ -945,6 +962,8 @@ class WeiboHomeScraper:
                 if normalized and normalized not in normalized_media:
                     normalized_media.append(normalized)
             image_urls = normalized_media
+            if has_video_box_in_content:
+                image_urls = ["视频"]
             if is_video_from_picture or any(u == "视频" for u in image_urls):
                 is_video_detail = True
 
@@ -1007,7 +1026,7 @@ class WeiboHomeScraper:
                     stat_map["shares_count"] = normalized[0]
                     stat_map["comments_count"] = normalized[1]
                     stat_map["likes_count"] = normalized[2]
-                    if _is_image_link(url):
+                    if _is_image_link(detail_url):
                         _log_detail("原因=链接为图片，详情结果作废")
                         return None
             except Exception:
@@ -1023,7 +1042,7 @@ class WeiboHomeScraper:
 
             details = {
                 "note_id": post_ref.get("note_id"),
-                "post_url": url,
+                "post_url": detail_url,
                 "title": title,
                 "author_name": author_name,
                 "content": content_text,

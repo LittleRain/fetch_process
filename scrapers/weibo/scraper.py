@@ -27,6 +27,15 @@ class WeiboHomeScraper:
             self.page = await self._new_prepared_page()
         return self.page
 
+    async def _goto_page(self, page: Page, url: str) -> None:
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            return
+        except PlaywrightTimeoutError:
+            pass
+        # In headless mode, the "load" event can hang; fall back to commit.
+        await page.goto(url, wait_until="commit", timeout=30000)
+
     async def close(self):
         try:
             if self.page and not self.page.is_closed():
@@ -268,10 +277,7 @@ class WeiboHomeScraper:
         爬取微博主页的内容列表。
         """
         page = await self._ensure_page()
-        try:
-            await page.goto(user_url, wait_until="domcontentloaded")
-        except PlaywrightTimeoutError:
-            await page.goto(user_url)
+        await self._goto_page(page, user_url)
 
         try:
             await page.wait_for_selector(
@@ -622,10 +628,7 @@ class WeiboHomeScraper:
         detail_page: Optional[Page] = None
         try:
             detail_page = await self._new_prepared_page()
-            try:
-                await detail_page.goto(detail_url, wait_until="domcontentloaded")
-            except PlaywrightTimeoutError:
-                await detail_page.goto(detail_url)
+            await self._goto_page(detail_page, detail_url)
 
             try:
                 await self._ensure_logged_in(detail_page)
